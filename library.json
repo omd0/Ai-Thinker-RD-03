@@ -1,0 +1,25 @@
+{
+  "name": "Ai-Thinker-RD-03",
+  "version": "0.7.0",
+  "description": "Arduino library for the Ai-Thinker RD-03 24Ghz FMCW radar sensor. This sensor is a Frequency Modulated Continuous Wave radar, which makes it good for presence detection and its sensitivity at different ranges of moving targets can be configured.",
+  "keywords": "radar, fmcw, presence, detection, sensor, ai-thinker, rd-03",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Gjorgjevikj/Ai-Thinker-RD-03.git"
+  },
+  "authors": [
+    {
+      "name": "Dejan Gjorgjevikj",
+      "email": "dejan.gjorgjevikj@gmail.com",
+      "maintainer": true
+    }
+  ],
+  "license": "GPL-3.0",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src"
+  },
+  "dependencies": {}
+}
