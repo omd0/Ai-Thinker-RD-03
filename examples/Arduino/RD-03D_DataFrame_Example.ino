@@ -1,5 +1,5 @@
 /*
-  RD-03D Data Frame Example for PlatformIO
+  RD-03D Data Frame Example
   Demonstrates the new data frame parsing capabilities of the Ai-Thinker RD-03D library
   
   This example shows how to:
@@ -7,11 +7,10 @@
   - Switch between single and multi-target detection modes
   - Parse target coordinates (X, Y) and calculate distance/angle
   - Display target information including velocity
-  - Handle different frame types and error conditions
   
   Hardware Connections:
-  - RD-03D TX -> ESP32 RX (Pin 16)
-  - RD-03D RX -> ESP32 TX (Pin 17)
+  - RD-03D TX -> Arduino RX (Pin 2)
+  - RD-03D RX -> Arduino TX (Pin 3)
   - RD-03D VCC -> 3.3V
   - RD-03D GND -> GND
   
@@ -19,15 +18,14 @@
   By: Ai-Thinker RD-03D Library
 */
 
-#include <Arduino.h>
 #include "Ai-Thinker-RD-03.h"
 
 // Create RD-03D instance
 AiThinker_RD_03D radar;
 
-// Pin definitions for ESP32
-const int RX_PIN = 16;
-const int TX_PIN = 17;
+// Pin definitions
+const int RX_PIN = 2;
+const int TX_PIN = 3;
 
 // Detection mode
 bool multiTargetMode = true;
@@ -36,10 +34,6 @@ bool multiTargetMode = true;
 unsigned long lastPrintTime = 0;
 const unsigned long PRINT_INTERVAL = 1000; // Print every second
 
-// Statistics
-unsigned long frameCount = 0;
-unsigned long errorCount = 0;
-
 void setup() {
   // Initialize serial communication
   Serial.begin(115200);
@@ -47,8 +41,8 @@ void setup() {
     delay(10);
   }
   
-  Serial.println("RD-03D Data Frame Example for PlatformIO");
-  Serial.println("==========================================");
+  Serial.println("RD-03D Data Frame Example");
+  Serial.println("==========================");
   
   // Initialize radar sensor
   if (radar.begin(Serial2, RX_PIN, TX_PIN)) {
@@ -88,16 +82,11 @@ void loop() {
   
   // Check if new frame is available
   if (radar.frameReady()) {
-    frameCount++;
-    
-    // Get frame type
-    AiThinker_RD_03D::FrameType frameType = radar.getFrameType();
+    unsigned long currentTime = millis();
     
     // Print data at regular intervals
-    unsigned long currentTime = millis();
     if (currentTime - lastPrintTime >= PRINT_INTERVAL) {
       printTargetData();
-      printStatistics();
       lastPrintTime = currentTime;
     }
   }
@@ -145,58 +134,9 @@ void printTargetData() {
       Serial.print("Velocity: ");
       Serial.print(target.velocity);
       Serial.println(" cm/s");
-      
-      // Additional target analysis
-      analyzeTarget(target);
     }
   }
   Serial.println();
-}
-
-void analyzeTarget(const AiThinker_RD_03D::TargetInfo& target) {
-  // Analyze target movement patterns
-  static int16_t lastX = 0, lastY = 0;
-  static unsigned long lastTime = 0;
-  
-  unsigned long currentTime = millis();
-  if (lastTime > 0) {
-    unsigned long timeDiff = currentTime - lastTime;
-    if (timeDiff > 0) {
-      int16_t deltaX = target.x - lastX;
-      int16_t deltaY = target.y - lastY;
-      
-      // Calculate movement direction
-      if (abs(deltaX) > 5 || abs(deltaY) > 5) { // Threshold to avoid noise
-        Serial.print("    Movement: ");
-        if (deltaX > 0) Serial.print("Right ");
-        else if (deltaX < 0) Serial.print("Left ");
-        if (deltaY > 0) Serial.print("Forward ");
-        else if (deltaY < 0) Serial.print("Backward ");
-        Serial.println();
-      }
-    }
-  }
-  
-  lastX = target.x;
-  lastY = target.y;
-  lastTime = currentTime;
-}
-
-void printStatistics() {
-  Serial.print("Statistics - Frames: ");
-  Serial.print(frameCount);
-  Serial.print(", Errors: ");
-  Serial.print(errorCount);
-  Serial.print(", Success Rate: ");
-  if (frameCount > 0) {
-    float successRate = ((float)(frameCount - errorCount) / frameCount) * 100.0;
-    Serial.print(successRate, 1);
-    Serial.print("%");
-  } else {
-    Serial.print("N/A");
-  }
-  Serial.println();
-  Serial.println("----------------------------------------");
 }
 
 // Optional: Function to demonstrate mode switching
@@ -213,25 +153,5 @@ void switchDetectionMode() {
     if (radar.setSingleTargetMode()) {
       Serial.println("Single target mode activated");
     }
-  }
-}
-
-// Optional: Function to demonstrate configuration
-void configureRadar() {
-  Serial.println("Configuring radar parameters...");
-  
-  // Set detection range (20cm to 500cm)
-  if (radar.setDetectionRange(20, 500)) {
-    Serial.println("Detection range set to 20-500cm");
-  }
-  
-  // Set sensitivity (0-255, higher = more sensitive)
-  if (radar.setSensitivity(128)) {
-    Serial.println("Sensitivity set to 128");
-  }
-  
-  // Set output format to binary
-  if (radar.setOutputFormat(AiThinker_RD_03D::FORMAT_BINARY)) {
-    Serial.println("Output format set to binary");
   }
 } 
