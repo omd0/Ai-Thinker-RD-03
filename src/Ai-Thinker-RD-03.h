@@ -221,6 +221,28 @@ public:
         uint8_t outputFormat;             // Output format
     };
 
+    // Target tracking structure for filtering ghost targets
+    struct TrackedTarget
+    {
+        uint8_t id;                       // Track ID
+        float x, y;                       // Position coordinates (cm)
+        float velocity;                   // Velocity (cm/s)
+        uint16_t distance;                // Distance (cm)
+        int16_t angle;                    // Angle (degrees)
+        uint8_t age;                      // How many frames this target has been tracked
+        uint8_t frames_since_seen;        // Frames since last detection
+        bool confirmed;                   // Whether this is a confirmed track
+        unsigned long last_update_time;   // Last update timestamp
+    };
+
+    // Tracking algorithm constants
+    static const uint16_t MAX_TRACK_DISTANCE = 500;     // Maximum tracking distance (cm)
+    static const uint16_t MAX_TRACK_VELOCITY = 25;      // Maximum velocity for stationary scenario (cm/s)
+    static const uint8_t MIN_TRACK_AGE = 3;             // Minimum age for track confirmation
+    static const uint8_t MAX_FRAMES_MISSING = 5;        // Maximum frames before track deletion
+    static const uint8_t MAX_TRACKED_TARGETS = 8;       // Maximum number of tracked targets
+    static const float ASSOCIATION_THRESHOLD = 50.0;    // Distance threshold for data association (cm)
+
 #pragma pack()
 
     // Constructor
@@ -264,6 +286,14 @@ public:
     int16_t getTargetAngle(uint8_t index = 0) const;
     int16_t getTargetVelocity(uint8_t index = 0) const;
     uint8_t getTargetEnergy(uint8_t index = 0) const;
+
+    // Target tracking configuration
+    void setMaxTrackDistance(uint16_t distance) { maxTrackDistance = distance; }
+    uint16_t getMaxTrackDistance() const { return maxTrackDistance; }
+    void setMaxTrackVelocity(uint16_t velocity) { maxTrackVelocity = velocity; }
+    uint16_t getMaxTrackVelocity() const { return maxTrackVelocity; }
+    void setTrackingEnabled(bool enabled) { trackingEnabled = enabled; }
+    bool isTrackingEnabled() const { return trackingEnabled; }
 
     // Utility methods
     void setFrameTimeout(unsigned long timeout) { frameTimeout = timeout; }
@@ -329,6 +359,28 @@ private:
     RadarCommandFrame radarCommandFrame;
     
     void initRadarDataFrame();  // Initialize RD-03D specific data frame
+
+    // Target tracking variables
+    uint16_t maxTrackDistance;
+    uint16_t maxTrackVelocity;
+    bool trackingEnabled;
+    
+    // Tracked targets array and management
+    TrackedTarget trackedTargets[MAX_TRACKED_TARGETS];
+    uint8_t trackedTargetCount;
+    uint8_t nextTrackId;
+    
+    // Tracking algorithm methods
+    void initTracking();
+    bool isValidDetection(const TargetInfo& target) const;
+    float calculateDistance(float x1, float y1, float x2, float y2) const;
+    int findClosestTrack(const TargetInfo& detection);
+    void updateTrack(int trackIndex, const TargetInfo& detection);
+    void createNewTrack(const TargetInfo& detection);
+    void updateTrackStates();
+    void removeStaleTrack(int trackIndex);
+    void processRawDetections(const TargetInfo* rawTargets, uint8_t rawCount);
+    void buildConfirmedTargets();
 };
 
 #endif // _AI_THINKER_RD_03D_H

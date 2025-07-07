@@ -67,6 +67,23 @@ void setup() {
     }
   }
   
+  // Configure tracking parameters for better ghost target filtering
+  Serial.println("Configuring tracking parameters...");
+  radar.setMaxTrackDistance(500);  // Filter targets beyond 5 meters
+  radar.setMaxTrackVelocity(25);   // Filter fast-moving targets (good for stationary users)
+  radar.setTrackingEnabled(true);  // Enable tracking algorithm
+  
+  Serial.print("Max tracking distance: ");
+  Serial.print(radar.getMaxTrackDistance());
+  Serial.println(" cm");
+  
+  Serial.print("Max tracking velocity: ");
+  Serial.print(radar.getMaxTrackVelocity());
+  Serial.println(" cm/s");
+  
+  Serial.print("Tracking enabled: ");
+  Serial.println(radar.isTrackingEnabled() ? "Yes" : "No");
+  
   // Set detection mode
   if (multiTargetMode) {
     Serial.println("Setting multi-target detection mode...");
@@ -84,8 +101,9 @@ void setup() {
     }
   }
   
-  Serial.println("\nStarting detection...");
+  Serial.println("\nStarting detection with tracking...");
   Serial.println("Format: Target[ID] - Distance: Xcm, Angle: Y°, Velocity: Z cm/s");
+  Serial.println("Note: Only confirmed tracks (seen for 3+ frames) are displayed");
   Serial.println("================================================================");
 }
 

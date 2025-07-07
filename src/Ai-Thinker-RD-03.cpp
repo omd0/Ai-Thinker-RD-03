@@ -30,8 +30,232 @@ void AiThinker_RD_03D::init()
     configParams.sensitivity = 128;   // Medium sensitivity
     configParams.outputFormat = FORMAT_BINARY;
     
+    // Initialize tracking system
+    initTracking();
+    
     // Initialize RD-03D specific data frame from blog implementation
     initRadarDataFrame();
+}
+
+// Initialize the target tracking system
+void AiThinker_RD_03D::initTracking()
+{
+    maxTrackDistance = MAX_TRACK_DISTANCE;
+    maxTrackVelocity = MAX_TRACK_VELOCITY;
+    trackingEnabled = true;
+    trackedTargetCount = 0;
+    nextTrackId = 1;
+    
+    // Clear all tracked targets
+    for (uint8_t i = 0; i < MAX_TRACKED_TARGETS; i++)
+    {
+        trackedTargets[i].id = 0;
+        trackedTargets[i].x = 0;
+        trackedTargets[i].y = 0;
+        trackedTargets[i].velocity = 0;
+        trackedTargets[i].distance = 0;
+        trackedTargets[i].angle = 0;
+        trackedTargets[i].age = 0;
+        trackedTargets[i].frames_since_seen = 0;
+        trackedTargets[i].confirmed = false;
+        trackedTargets[i].last_update_time = 0;
+    }
+}
+
+// Check if a detection is valid (within range and velocity limits)
+bool AiThinker_RD_03D::isValidDetection(const TargetInfo& target) const
+{
+    if (!trackingEnabled) return true;
+    
+    // Range gating: filter out targets beyond maximum distance
+    if (target.distance > maxTrackDistance)
+    {
+        return false;
+    }
+    
+    // Velocity gating: filter out targets moving too fast for stationary scenario
+    if (abs(target.velocity) > maxTrackVelocity)
+    {
+        return false;
+    }
+    
+    return true;
+}
+
+// Calculate Euclidean distance between two points
+float AiThinker_RD_03D::calculateDistance(float x1, float y1, float x2, float y2) const
+{
+    return sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+}
+
+// Find the closest tracked target to a new detection
+int AiThinker_RD_03D::findClosestTrack(const TargetInfo& detection)
+{
+    int bestTrackIndex = -1;
+    float bestDistance = ASSOCIATION_THRESHOLD;
+    
+    for (uint8_t i = 0; i < trackedTargetCount; i++)
+    {
+        float distance = calculateDistance(
+            trackedTargets[i].x, trackedTargets[i].y,
+            detection.x, detection.y
+        );
+        
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            bestTrackIndex = i;
+        }
+    }
+    
+    return bestTrackIndex;
+}
+
+// Update an existing track with new detection data
+void AiThinker_RD_03D::updateTrack(int trackIndex, const TargetInfo& detection)
+{
+    TrackedTarget& track = trackedTargets[trackIndex];
+    
+    // Simple moving average to smooth the data
+    float alpha = 0.3f; // Smoothing factor
+    
+    track.x = alpha * detection.x + (1 - alpha) * track.x;
+    track.y = alpha * detection.y + (1 - alpha) * track.y;
+    track.velocity = alpha * detection.velocity + (1 - alpha) * track.velocity;
+    track.distance = sqrt(track.x * track.x + track.y * track.y);
+    track.angle = atan2(track.y, track.x) * 180.0 / PI;
+    
+    track.age++;
+    track.frames_since_seen = 0;
+    track.last_update_time = millis();
+    
+    // Confirm track if it has been seen enough times
+    if (track.age >= MIN_TRACK_AGE)
+    {
+        track.confirmed = true;
+    }
+}
+
+// Create a new track from a detection
+void AiThinker_RD_03D::createNewTrack(const TargetInfo& detection)
+{
+    if (trackedTargetCount >= MAX_TRACKED_TARGETS) return;
+    
+    TrackedTarget& track = trackedTargets[trackedTargetCount];
+    
+    track.id = nextTrackId++;
+    track.x = detection.x;
+    track.y = detection.y;
+    track.velocity = detection.velocity;
+    track.distance = detection.distance;
+    track.angle = detection.angle;
+    track.age = 1;
+    track.frames_since_seen = 0;
+    track.confirmed = false;
+    track.last_update_time = millis();
+    
+    trackedTargetCount++;
+}
+
+// Update track states and remove stale tracks
+void AiThinker_RD_03D::updateTrackStates()
+{
+    for (int i = trackedTargetCount - 1; i >= 0; i--)
+    {
+        TrackedTarget& track = trackedTargets[i];
+        track.frames_since_seen++;
+        
+        // Remove tracks that haven't been seen for too long
+        if (track.frames_since_seen > MAX_FRAMES_MISSING)
+        {
+            removeStaleTrack(i);
+        }
+    }
+}
+
+// Remove a stale track from the array
+void AiThinker_RD_03D::removeStaleTrack(int trackIndex)
+{
+    // Shift all tracks after the removed one forward
+    for (uint8_t i = trackIndex; i < trackedTargetCount - 1; i++)
+    {
+        trackedTargets[i] = trackedTargets[i + 1];
+    }
+    
+    trackedTargetCount--;
+}
+
+// Process raw detections through the tracking algorithm
+void AiThinker_RD_03D::processRawDetections(const TargetInfo* rawTargets, uint8_t rawCount)
+{
+    if (!trackingEnabled)
+    {
+        // If tracking is disabled, pass through raw detections
+        for (uint8_t i = 0; i < rawCount && i < 8; i++)
+        {
+            targets[i] = rawTargets[i];
+        }
+        targetCount = rawCount;
+        return;
+    }
+    
+    // First, update track states (increment frames_since_seen)
+    updateTrackStates();
+    
+    // Process each raw detection
+    for (uint8_t i = 0; i < rawCount; i++)
+    {
+        const TargetInfo& detection = rawTargets[i];
+        
+        // Apply gating filters
+        if (!isValidDetection(detection))
+        {
+            continue; // Skip invalid detections
+        }
+        
+        // Find the closest existing track
+        int closestTrackIndex = findClosestTrack(detection);
+        
+        if (closestTrackIndex >= 0)
+        {
+            // Update existing track
+            updateTrack(closestTrackIndex, detection);
+        }
+        else
+        {
+            // Create new track
+            createNewTrack(detection);
+        }
+    }
+    
+    // Build the final target list from confirmed tracks
+    buildConfirmedTargets();
+}
+
+// Build the target list from confirmed tracks only
+void AiThinker_RD_03D::buildConfirmedTargets()
+{
+    targetCount = 0;
+    
+    for (uint8_t i = 0; i < trackedTargetCount && targetCount < 8; i++)
+    {
+        const TrackedTarget& track = trackedTargets[i];
+        
+        // Only include confirmed tracks
+        if (track.confirmed)
+        {
+            targets[targetCount].targetId = track.id;
+            targets[targetCount].x = (int16_t)track.x;
+            targets[targetCount].y = (int16_t)track.y;
+            targets[targetCount].velocity = (int16_t)track.velocity;
+            targets[targetCount].distance = track.distance;
+            targets[targetCount].angle = track.angle;
+            targets[targetCount].energy = 0; // Not used in tracking
+            targets[targetCount].status = 1; // Active
+            
+            targetCount++;
+        }
+    }
 }
 
 // Initialize RD-03D radar data frame with specific command arrays
@@ -94,7 +318,9 @@ int AiThinker_RD_03D::read()
         {
             uint8_t* RX_BUF = radarDataFrame.RX_BUF;
     
-            targetCount = 0;
+            // Parse raw target data into temporary array
+            TargetInfo rawTargets[3];
+            uint8_t rawTargetCount = 0;
             
             if (radarDataFrame.RX_count > 9)
             {
@@ -104,15 +330,15 @@ int AiThinker_RD_03D::read()
                 
                 if (target1_x != 0 || target1_y != 0)
                 {
-                    targets[targetCount].targetId = 1;
-                    targets[targetCount].x = target1_x;
-                    targets[targetCount].y = target1_y;
-                    targets[targetCount].velocity = target1_speed;
-                    targets[targetCount].distance = sqrt(pow(target1_x, 2) + pow(target1_y, 2));
-                    targets[targetCount].angle = atan2(target1_y, target1_x) * 180.0 / PI;
-                    targets[targetCount].energy = 0;
-                    targets[targetCount].status = 1;
-                    targetCount++;
+                    rawTargets[rawTargetCount].targetId = 1;
+                    rawTargets[rawTargetCount].x = target1_x;
+                    rawTargets[rawTargetCount].y = target1_y;
+                    rawTargets[rawTargetCount].velocity = target1_speed;
+                    rawTargets[rawTargetCount].distance = sqrt(pow(target1_x, 2) + pow(target1_y, 2));
+                    rawTargets[rawTargetCount].angle = atan2(target1_y, target1_x) * 180.0 / PI;
+                    rawTargets[rawTargetCount].energy = 0;
+                    rawTargets[rawTargetCount].status = 1;
+                    rawTargetCount++;
                     radarDataFrame.Radar_1 = 1;
                 }
                 else
@@ -129,15 +355,15 @@ int AiThinker_RD_03D::read()
                 
                 if (target2_x != 0 || target2_y != 0)
                 {
-                    targets[targetCount].targetId = 2;
-                    targets[targetCount].x = target2_x;
-                    targets[targetCount].y = target2_y;
-                    targets[targetCount].velocity = target2_speed;
-                    targets[targetCount].distance = sqrt(pow(target2_x, 2) + pow(target2_y, 2));
-                    targets[targetCount].angle = atan2(target2_y, target2_x) * 180.0 / PI;
-                    targets[targetCount].energy = 0;
-                    targets[targetCount].status = 1;
-                    targetCount++;
+                    rawTargets[rawTargetCount].targetId = 2;
+                    rawTargets[rawTargetCount].x = target2_x;
+                    rawTargets[rawTargetCount].y = target2_y;
+                    rawTargets[rawTargetCount].velocity = target2_speed;
+                    rawTargets[rawTargetCount].distance = sqrt(pow(target2_x, 2) + pow(target2_y, 2));
+                    rawTargets[rawTargetCount].angle = atan2(target2_y, target2_x) * 180.0 / PI;
+                    rawTargets[rawTargetCount].energy = 0;
+                    rawTargets[rawTargetCount].status = 1;
+                    rawTargetCount++;
                     radarDataFrame.Radar_2 = 1;
                 }
                 else
@@ -154,15 +380,15 @@ int AiThinker_RD_03D::read()
                 
                 if (target3_x != 0 || target3_y != 0)
                 {
-                    targets[targetCount].targetId = 3;
-                    targets[targetCount].x = target3_x;
-                    targets[targetCount].y = target3_y;
-                    targets[targetCount].velocity = target3_speed;
-                    targets[targetCount].distance = sqrt(pow(target3_x, 2) + pow(target3_y, 2));
-                    targets[targetCount].angle = atan2(target3_y, target3_x) * 180.0 / PI;
-                    targets[targetCount].energy = 0;
-                    targets[targetCount].status = 1;
-                    targetCount++;
+                    rawTargets[rawTargetCount].targetId = 3;
+                    rawTargets[rawTargetCount].x = target3_x;
+                    rawTargets[rawTargetCount].y = target3_y;
+                    rawTargets[rawTargetCount].velocity = target3_speed;
+                    rawTargets[rawTargetCount].distance = sqrt(pow(target3_x, 2) + pow(target3_y, 2));
+                    rawTargets[rawTargetCount].angle = atan2(target3_y, target3_x) * 180.0 / PI;
+                    rawTargets[rawTargetCount].energy = 0;
+                    rawTargets[rawTargetCount].status = 1;
+                    rawTargetCount++;
                     radarDataFrame.Radar_3 = 1;
                 }
                 else
@@ -171,6 +397,10 @@ int AiThinker_RD_03D::read()
                 }
             }
             
+            // Process raw detections through the tracking algorithm
+            processRawDetections(rawTargets, rawTargetCount);
+            
+            // Set frame type based on confirmed target count
             if (targetCount == 1)
             {
                 lastFrameType = TARGET_DATA;
