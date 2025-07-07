@@ -1,6 +1,7 @@
 #include "Ai-Thinker-RD-03.h"
 #include <Arduino.h>
 #include <string.h>  // For memset and memcpy
+#include <math.h>    // For sqrt and atan2
 
 // Static command arrays from STM32 blog implementation
 const uint8_t AiThinker_RD_03D::Single_Target_Detection_CMD[15] = {0xFD, 0xFC, 0xFB, 0xFA, 0x02, 0x00, 0x80, 0x00, 0x04, 0x03, 0x02, 0x01};
@@ -141,22 +142,25 @@ int AiThinker_RD_03D::read()
                     {
                         // Parse the frame based on type
                         uint8_t frameType = bufferCurrentFrame[1];
-                        if (frameType == 0x01) // Single target
+                        if (frameType == 0x01 || frameType == 0x02) // Single or Multi-target
                         {
-                            lastFrameType = TARGET_DATA;
-                            const SingleTargetFrame* frame = reinterpret_cast<const SingleTargetFrame*>(bufferCurrentFrame);
-                            targetCount = 1;
-                            targets[0] = frame->target;
-                        }
-                        else if (frameType == 0x02) // Multi-target
-                        {
-                            lastFrameType = MULTI_TARGET_DATA;
-                            const MultiTargetFrame* frame = reinterpret_cast<const MultiTargetFrame*>(bufferCurrentFrame);
-                            targetCount = frame->targetCount;
-                            if (targetCount > 8) targetCount = 8; // Safety limit
+                            lastFrameType = (frameType == 0x01) ? TARGET_DATA : MULTI_TARGET_DATA;
+                            targetCount = bufferCurrentFrame[3];
+                            if (targetCount > 3) targetCount = 3; // Limit to 3 targets as per blog
+                            
                             for (int i = 0; i < targetCount; i++)
                             {
-                                targets[i] = frame->targets[i];
+                                int offset = 4 + i * 6; // 6 bytes per target (x, y, speed)
+                                if (offset + 5 < currentFrameIndex) {
+                                    targets[i].targetId = i;
+                                    targets[i].x = getSignedValue(bufferCurrentFrame[offset], bufferCurrentFrame[offset + 1]);
+                                    targets[i].y = getSignedValue(bufferCurrentFrame[offset + 2], bufferCurrentFrame[offset + 3]);
+                                    targets[i].velocity = getSignedValue(bufferCurrentFrame[offset + 4], bufferCurrentFrame[offset + 5]);
+                                    targets[i].distance = sqrt(pow(targets[i].x, 2) + pow(targets[i].y, 2));
+                                    targets[i].angle = atan2(targets[i].y, targets[i].x) * 180.0 / PI;
+                                    targets[i].energy = 0; // Not available in this data format
+                                    targets[i].status = 0; // Not available in this data format
+                                }
                             }
                         }
                         else if (frameType == 0x03) // Debug data
@@ -175,6 +179,17 @@ int AiThinker_RD_03D::read()
     }
     
     return rc;
+}
+
+int16_t AiThinker_RD_03D::getSignedValue(uint8_t low, uint8_t high) const
+{
+    uint16_t raw_val = (high << 8) | low;
+    // Sign-magnitude conversion
+    int16_t magnitude = raw_val & 0x7FFF;
+    if (raw_val & 0x8000) {
+        return -magnitude;
+    }
+    return magnitude;
 }
 
 int AiThinker_RD_03D::readUntilHeader()

@@ -171,34 +171,13 @@ public:
     struct TargetInfo
     {
         uint8_t targetId;                 // Target ID (0-255)
+        int16_t x;                        // X-coordinate in cm
+        int16_t y;                        // Y-coordinate in cm
         uint16_t distance;                // Distance in cm
-        int16_t angle;                    // Angle in degrees (-180 to 180)
+        int16_t angle;                    // Angle in degrees
         int16_t velocity;                 // Velocity in cm/s
         uint8_t energy;                   // Signal energy (0-255)
         uint8_t status;                   // Target status
-    };
-
-    // Legacy frame structures for compatibility
-    struct SingleTargetFrame
-    {
-        uint8_t header;                   // 0xAA
-        uint8_t frameType;                // 0x01 for single target
-        uint8_t dataLength;               // Length of data
-        TargetInfo target;                // Target information
-        uint8_t checksum;                 // Checksum
-        uint8_t trailer;                  // 0x55
-    };
-
-    // Multi-target data frame
-    struct MultiTargetFrame
-    {
-        uint8_t header;                   // 0xAA
-        uint8_t frameType;                // 0x02 for multi-target
-        uint8_t dataLength;               // Length of data
-        uint8_t targetCount;              // Number of targets
-        TargetInfo targets[8];            // Up to 8 targets
-        uint8_t checksum;                 // Checksum
-        uint8_t trailer;                  // 0x55
     };
 
     // Command frame structure
@@ -305,7 +284,7 @@ public:
     static void dumpFrame(const uint8_t* buff, int len, String pre = "", String post = "", Stream& dumpStream = Serial);
 
 private:
-    // Internal methods
+    int16_t getSignedValue(uint8_t low, uint8_t high) const;
     void init();
     bool sendCommand(RadarCommand command, const uint8_t* data = nullptr, uint8_t dataLen = 0);
     bool readAckFrame();
