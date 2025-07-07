@@ -36,6 +36,13 @@ bool multiTargetMode = true;
 unsigned long lastPrintTime = 0;
 const unsigned long PRINT_INTERVAL = 1000; // Print every second
 
+// Function declarations
+void printTargetData();
+void printStatistics();
+void analyzeTarget(const AiThinker_RD_03D::TargetInfo& target);
+void switchDetectionMode();
+void configureRadar();
+
 // Statistics
 unsigned long frameCount = 0;
 unsigned long errorCount = 0;
