@@ -210,4 +210,128 @@ for (uint8_t i = 0; i < targetCount; i++) {
 
 ## Conclusion
 
-This refactoring successfully updates the library to support the RD-03D radar module while maintaining the familiar API structure. The enhanced multi-target detection capabilities and improved performance make the RD-03D a significant upgrade over the original RD-03 module. 
+This refactoring successfully updates the library to support the RD-03D radar module while maintaining the familiar API structure. The enhanced multi-target detection capabilities and improved performance make the RD-03D a significant upgrade over the original RD-03 module.
+
+## Updated Radar Data Frame Structure
+
+### Overview
+The RD-03D library has been updated to include the STM32-style data frame structure from the Ai-Thinker blog implementation. This provides a more direct interface for working with the RD-03D radar sensor in embedded applications.
+
+### Key Changes Made
+
+#### 1. New Data Frame Structures Added
+
+**RadarDataFrame Structure:**
+```cpp
+struct RadarDataFrame
+{
+    uint8_t RX_BUF[64];               // 缓存数组 - Buffer array
+    uint8_t RX_count;                 // 计数位 - Count position
+    uint8_t RX_temp;                  // 缓存字符 - Buffer character
+    
+    uint8_t Radar_1;                  // 目标1标志位 - Target 1 flag
+    uint8_t Radar_2;                  // 目标2标志位 - Target 2 flag  
+    uint8_t Radar_3;                  // 目标3标志位 - Target 3 flag
+    
+    uint8_t Speaker_1;                // 语音播报目标1标志 - Voice broadcast target 1 flag
+    uint8_t Speaker_2;                // 语音播报目标2标志 - Voice broadcast target 2 flag
+    uint8_t Speaker_3;                // 语音播报目标3标志 - Voice broadcast target 3 flag
+};
+```
+
+**RadarCommandFrame Structure:**
+```cpp
+struct RadarCommandFrame
+{
+    // Single Target Detection Command
+    uint8_t Single_Target_Detection_CMD[15];  // = {0xFD, 0xFC, 0xFB, 0xFA, 0x02, 0x00, 0x80, 0x00, 0x04, 0x03, 0x02, 0x01}
+    
+    // Multi Target Detection Command  
+    uint8_t Multi_Target_Detection_CMD[15];   // = {0xFD, 0xFC, 0xFB, 0xFA, 0x02, 0x00, 0x90, 0x00, 0x04, 0x03, 0x02, 0x01}
+};
+```
+
+**SpeakerCommandFrame Structure:**
+```cpp
+struct SpeakerCommandFrame
+{
+    uint8_t SpeakerCMD_0[5];          // = {0x5A, 0x00, 0x08, 0x00, 0x01} - No target broadcast command
+    uint8_t SpeakerCMD_1[5];          // = {0x5A, 0x00, 0x08, 0x00, 0x02} - 1 target broadcast command
+    uint8_t SpeakerCMD_2[5];          // = {0x5A, 0x00, 0x08, 0x00, 0x03} - 2 target broadcast command
+    uint8_t SpeakerCMD_3[5];          // = {0x5A, 0x00, 0x08, 0x00, 0x04} - 3 target broadcast command
+};
+```
+
+#### 2. Command Arrays from Blog Implementation
+
+The following command arrays have been integrated from the STM32 blog implementation:
+
+- **Single Target Detection Command:** `{0xFD, 0xFC, 0xFB, 0xFA, 0x02, 0x00, 0x80, 0x00, 0x04, 0x03, 0x02, 0x01}`
+- **Multi Target Detection Command:** `{0xFD, 0xFC, 0xFB, 0xFA, 0x02, 0x00, 0x90, 0x00, 0x04, 0x03, 0x02, 0x01}`
+
+#### 3. Speaker Commands for Voice Feedback
+
+- **SpeakerCMD_0:** `{0x5A, 0x00, 0x08, 0x00, 0x01}` - No target detected
+- **SpeakerCMD_1:** `{0x5A, 0x00, 0x08, 0x00, 0x02}` - 1 target detected  
+- **SpeakerCMD_2:** `{0x5A, 0x00, 0x08, 0x00, 0x03}` - 2 targets detected
+- **SpeakerCMD_3:** `{0x5A, 0x00, 0x08, 0x00, 0x04}` - 3 targets detected
+
+#### 4. Updated PlatformIO Example
+
+The PlatformIO example (`examples/PlatformIO/src/main.cpp`) has been enhanced to demonstrate:
+
+- STM32-style data frame variables
+- Command frame usage
+- Radar flag management (Radar_1, Radar_2, Radar_3)
+- Speaker command integration
+- Target count-based flag updates
+
+### Usage Example
+
+```cpp
+// STM32-style data frame variables
+uint8_t RX_BUF[64] = {0};      // Buffer array
+uint8_t RX_count = 0;          // Count position
+uint8_t RX_temp;               // Buffer character
+
+uint8_t Radar_1 = 0;           // Target 1 flag
+uint8_t Radar_2 = 0;           // Target 2 flag
+uint8_t Radar_3 = 0;           // Target 3 flag
+
+// Command arrays
+uint8_t Single_Target_Detection_CMD[15] = {0xFD, 0xFC, 0xFB, 0xFA, 0x02, 0x00, 0x80, 0x00, 0x04, 0x03, 0x02, 0x01};
+uint8_t Multi_Target_Detection_CMD[15]  = {0xFD, 0xFC, 0xFB, 0xFA, 0x02, 0x00, 0x90, 0x00, 0x04, 0x03, 0x02, 0x01};
+
+// Speaker commands
+uint8_t SpeakerCMD_0[5] = {0x5A, 0x00, 0x08, 0x00, 0x01}; // No target
+uint8_t SpeakerCMD_1[5] = {0x5A, 0x00, 0x08, 0x00, 0x02}; // 1 target
+uint8_t SpeakerCMD_2[5] = {0x5A, 0x00, 0x08, 0x00, 0x03}; // 2 targets
+uint8_t SpeakerCMD_3[5] = {0x5A, 0x00, 0x08, 0x00, 0x04}; // 3 targets
+
+// Update radar flags based on target count
+void updateRadarFlags(uint8_t targetCount) {
+    Radar_1 = (targetCount >= 1) ? 1 : 0;
+    Radar_2 = (targetCount >= 2) ? 1 : 0;
+    Radar_3 = (targetCount >= 3) ? 1 : 0;
+}
+```
+
+### Benefits of This Update
+
+1. **STM32 Compatibility:** Direct integration with STM32-based projects using the exact data frame structure from the blog
+2. **Voice Feedback Support:** Built-in speaker command arrays for audio feedback systems
+3. **Simplified Flag Management:** Easy-to-use radar flags for target detection status
+4. **Command Integration:** Pre-defined command arrays for mode switching
+5. **Buffer Management:** Proper buffer handling as per STM32 implementation
+
+### Files Modified
+
+- `src/Ai-Thinker-RD-03.h` - Added new data frame structures
+- `src/Ai-Thinker-RD-03.cpp` - Added initialization methods for new structures
+- `examples/PlatformIO/src/main.cpp` - Enhanced example with STM32-style implementation
+
+### Reference
+
+Based on the STM32 implementation from: https://aithinker.blog.csdn.net/article/details/133338984
+
+The blog demonstrates using STM32F103C8T6 with CubeMX and HAL library to process RD-03D serial data and integrate with VC-02 voice module for real-time target count announcements. 

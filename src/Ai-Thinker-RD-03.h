@@ -86,6 +86,9 @@ https://github.com/Gjorgjevikj/...todo
 // Buffer size for RD-03D data frames
 #define RECEIVE_BUFFER_SIZE 2048
 
+// RD-03D specific buffer and command definitions based on STM32 implementation
+#define RX_BUFFER_SIZE 64
+
 class AiThinker_RD_03D
 {
 public:
@@ -138,6 +141,32 @@ public:
     };
 
 #pragma pack (1)
+    // RD-03D Radar Data Frame Structure (from STM32 blog implementation)
+    struct RadarDataFrame
+    {
+        uint8_t RX_BUF[64];               // 缓存数组 - Buffer array
+        uint8_t RX_count;                 // 计数位 - Count position
+        uint8_t RX_temp;                  // 缓存字符 - Buffer character
+        
+        uint8_t Radar_1;                  // 目标1标志位 - Target 1 flag
+        uint8_t Radar_2;                  // 目标2标志位 - Target 2 flag  
+        uint8_t Radar_3;                  // 目标3标志位 - Target 3 flag
+    };
+
+    // RD-03D Command Frame Structure
+    struct RadarCommandFrame
+    {
+        // Single Target Detection Command
+        uint8_t Single_Target_Detection_CMD[15];  // = {0xFD, 0xFC, 0xFB, 0xFA, 0x02, 0x00, 0x80, 0x00, 0x04, 0x03, 0x02, 0x01}
+        
+        // Multi Target Detection Command  
+        uint8_t Multi_Target_Detection_CMD[15];   // = {0xFD, 0xFC, 0xFB, 0xFA, 0x02, 0x00, 0x90, 0x00, 0x04, 0x03, 0x02, 0x01}
+    };
+
+    // Static command arrays from STM32 blog implementation
+    static const uint8_t Single_Target_Detection_CMD[15];
+    static const uint8_t Multi_Target_Detection_CMD[15];
+
     // Target information structure for RD-03D
     struct TargetInfo
     {
@@ -149,7 +178,7 @@ public:
         uint8_t status;                   // Target status
     };
 
-    // Single target data frame
+    // Legacy frame structures for compatibility
     struct SingleTargetFrame
     {
         uint8_t header;                   // 0xAA
@@ -263,9 +292,14 @@ public:
     void setInterCommandDelay(unsigned long delay) { interCommandDelay = delay; }
     unsigned long getInterCommandDelay() const { return interCommandDelay; }
     void clearRxBuffer();
-    const char* getLastFrame() const { return reinterpret_cast<const char*>(bufferLastFrame); }
+    
     int getFrameLength() const { return receivedFrameLen; }
-
+    
+    // Command array access methods
+    static const uint8_t* getSingleTargetCommand() { return Single_Target_Detection_CMD; }
+    static const uint8_t* getMultiTargetCommand() { return Multi_Target_Detection_CMD; }
+    static constexpr size_t getCommandSize() { return 15; }
+    
     // Debug methods
     void dumpLastFrame(String label = "", Stream& dumpStream = Serial) const;
     static void dumpFrame(const uint8_t* buff, int len, String pre = "", String post = "", Stream& dumpStream = Serial);
@@ -309,6 +343,12 @@ private:
     FirmwareVersion firmwareVersion;
     uint32_t serialNumber;
     ConfigParams configParams;
+
+    // RD-03D specific data frame instances
+    RadarDataFrame radarDataFrame;
+    RadarCommandFrame radarCommandFrame;
+    
+    void initRadarDataFrame();  // Initialize RD-03D specific data frame
 };
 
 #endif // _AI_THINKER_RD_03D_H

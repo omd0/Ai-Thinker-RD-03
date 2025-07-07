@@ -1,4 +1,10 @@
-#include <Ai-Thinker-RD-03.h>
+#include "Ai-Thinker-RD-03.h"
+#include <Arduino.h>
+#include <string.h>  // For memset and memcpy
+
+// Static command arrays from STM32 blog implementation
+const uint8_t AiThinker_RD_03D::Single_Target_Detection_CMD[15] = {0xFD, 0xFC, 0xFB, 0xFA, 0x02, 0x00, 0x80, 0x00, 0x04, 0x03, 0x02, 0x01};
+const uint8_t AiThinker_RD_03D::Multi_Target_Detection_CMD[15] = {0xFD, 0xFC, 0xFB, 0xFA, 0x02, 0x00, 0x90, 0x00, 0x04, 0x03, 0x02, 0x01};
 
 // This library is made for little endian systems only!
 #ifdef TEST_LITTLE_ENDIAN
@@ -22,6 +28,20 @@ void AiThinker_RD_03D::init()
     configParams.maxDistance = 800;   // 800cm maximum
     configParams.sensitivity = 128;   // Medium sensitivity
     configParams.outputFormat = FORMAT_BINARY;
+    
+    // Initialize RD-03D specific data frame from blog implementation
+    initRadarDataFrame();
+}
+
+// Initialize RD-03D radar data frame with specific command arrays
+void AiThinker_RD_03D::initRadarDataFrame()
+{
+    // Initialize radar data frame structure
+    memset(&radarDataFrame, 0, sizeof(radarDataFrame));
+    
+    // Initialize command frame with specific command arrays from blog
+    memcpy(radarCommandFrame.Single_Target_Detection_CMD, Single_Target_Detection_CMD, 15);
+    memcpy(radarCommandFrame.Multi_Target_Detection_CMD, Multi_Target_Detection_CMD, 15);
 }
 
 bool AiThinker_RD_03D::begin(HardwareSerial& rSerial, int rxPin, int txPin, int rxBufferSize)
