@@ -285,6 +285,7 @@ public:
 
 private:
     int16_t getSignedValue(uint8_t low, uint8_t high) const;
+    void parseDataFrame();
     void init();
     bool sendCommand(RadarCommand command, const uint8_t* data = nullptr, uint8_t dataLen = 0);
     bool readAckFrame();

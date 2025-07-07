@@ -77,115 +77,148 @@ int AiThinker_RD_03D::read()
 {
     int rc = 0;
     
-    if (inConfigMode)
+    while (radarUART->available())
     {
-        // Handle configuration mode responses
-        if (!inFrame)
+        uint8_t c = radarUART->read();
+        rc++;
+        
+        // Store in RX_BUF following the blog implementation
+        radarDataFrame.RX_BUF[radarDataFrame.RX_count] = c;
+        radarDataFrame.RX_count++;
+        
+        // Reset buffer if it gets too full
+        if (radarDataFrame.RX_count >= 64)
         {
-            rc += readUntilHeader();
+            radarDataFrame.RX_count = 0;
         }
-        else
+        
+        // Look for complete frame - blog shows frames end with specific patterns
+        // Check if we have enough data for a complete frame (minimum 22 bytes for multi-target)
+        if (radarDataFrame.RX_count >= 22)
         {
-            while (radarUART->available())
-            {
-                uint8_t c = radarUART->read();
-                rc++;
-                bufferCurrentFrame[currentFrameIndex++] = c;
-
-                if (currentFrameIndex >= RECEIVE_BUFFER_SIZE)
-                {
-                    R_LOG_ERROR("ERROR: Receive buffer overrun!\n");
-                    inFrame = false;
-                    frameAvailable = false;
-                    currentFrameIndex = 0;
-                }
-                else if (currentFrameIndex >= 6 && bufferCurrentFrame[currentFrameIndex - 1] == FRAME_TRAILER)
-                {
-                    // Check if we have a complete ACK frame
-                    if (validateFrame(bufferCurrentFrame, currentFrameIndex))
-                    {
-                        frameAvailable = true;
-                        lastFrameType = ACK_FRAME;
-                        swapBuffers();
-                        inFrame = false;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    else
-    {
-        // Handle normal data frames
-        if (!inFrame)
-        {
-            rc += readUntilHeader();
-        }
-        else
-        {
-            while (radarUART->available())
-            {
-                uint8_t c = radarUART->read();
-                rc++;
-                bufferCurrentFrame[currentFrameIndex++] = c;
-
-                if (currentFrameIndex >= RECEIVE_BUFFER_SIZE)
-                {
-                    R_LOG_ERROR("ERROR: Receive buffer overrun!\n");
-                    inFrame = false;
-                    currentFrameIndex = 0;
-                }
-                else if (currentFrameIndex >= 6 && bufferCurrentFrame[currentFrameIndex - 1] == FRAME_TRAILER)
-                {
-                    // Check if we have a complete data frame
-                    if (validateFrame(bufferCurrentFrame, currentFrameIndex))
-                    {
-                        // Parse the frame based on type
-                        uint8_t frameType = bufferCurrentFrame[1];
-                        if (frameType == 0x01 || frameType == 0x02) // Single or Multi-target
-                        {
-                            lastFrameType = (frameType == 0x01) ? TARGET_DATA : MULTI_TARGET_DATA;
-                            targetCount = bufferCurrentFrame[3];
-                            if (targetCount > 3) targetCount = 3; // Limit to 3 targets as per blog
-                            
-                            for (int i = 0; i < targetCount; i++)
-                            {
-                                int offset = 4 + i * 6; // 6 bytes per target (x, y, speed)
-                                if (offset + 5 < currentFrameIndex) {
-                                    targets[i].targetId = i;
-                                    targets[i].x = getSignedValue(bufferCurrentFrame[offset], bufferCurrentFrame[offset + 1]);
-                                    targets[i].y = getSignedValue(bufferCurrentFrame[offset + 2], bufferCurrentFrame[offset + 3]);
-                                    targets[i].velocity = getSignedValue(bufferCurrentFrame[offset + 4], bufferCurrentFrame[offset + 5]);
-                                    targets[i].distance = sqrt(pow(targets[i].x, 2) + pow(targets[i].y, 2));
-                                    targets[i].angle = atan2(targets[i].y, targets[i].x) * 180.0 / PI;
-                                    targets[i].energy = 0; // Not available in this data format
-                                    targets[i].status = 0; // Not available in this data format
-                                }
-                            }
-                        }
-                        else if (frameType == 0x03) // Debug data
-                        {
-                            lastFrameType = DEBUG_DATA;
-                        }
-                        
-                        frameAvailable = true;
-                        swapBuffers();
-                        inFrame = false;
-                        break;
-                    }
-                }
-            }
+            // Parse the frame according to blog format
+            parseDataFrame();
+            frameAvailable = true;
+            radarDataFrame.RX_count = 0; // Reset for next frame
         }
     }
     
     return rc;
 }
 
+void AiThinker_RD_03D::parseDataFrame()
+{
+    uint8_t* RX_BUF = radarDataFrame.RX_BUF;
+    
+    // Reset target count
+    targetCount = 0;
+    
+    // Parse according to blog implementation
+    // The blog shows target data starting at specific offsets
+    
+    // Check for target 1 (offsets 4-9 for x, y, speed)
+    if (radarDataFrame.RX_count > 9)
+    {
+        int16_t target1_x = getSignedValue(RX_BUF[4], RX_BUF[5]);
+        int16_t target1_y = getSignedValue(RX_BUF[6], RX_BUF[7]);
+        int16_t target1_speed = getSignedValue(RX_BUF[8], RX_BUF[9]);
+        
+        // Check if target 1 is valid (non-zero coordinates)
+        if (target1_x != 0 || target1_y != 0)
+        {
+            targets[targetCount].targetId = 1;
+            targets[targetCount].x = target1_x;
+            targets[targetCount].y = target1_y;
+            targets[targetCount].velocity = target1_speed;
+            targets[targetCount].distance = sqrt(pow(target1_x, 2) + pow(target1_y, 2));
+            targets[targetCount].angle = atan2(target1_y, target1_x) * 180.0 / PI;
+            targets[targetCount].energy = 0;
+            targets[targetCount].status = 1;
+            targetCount++;
+            radarDataFrame.Radar_1 = 1;
+        }
+        else
+        {
+            radarDataFrame.Radar_1 = 0;
+        }
+    }
+    
+    // Check for target 2 (offsets 10-15)
+    if (radarDataFrame.RX_count > 15)
+    {
+        int16_t target2_x = getSignedValue(RX_BUF[10], RX_BUF[11]);
+        int16_t target2_y = getSignedValue(RX_BUF[12], RX_BUF[13]);
+        int16_t target2_speed = getSignedValue(RX_BUF[14], RX_BUF[15]);
+        
+        if (target2_x != 0 || target2_y != 0)
+        {
+            targets[targetCount].targetId = 2;
+            targets[targetCount].x = target2_x;
+            targets[targetCount].y = target2_y;
+            targets[targetCount].velocity = target2_speed;
+            targets[targetCount].distance = sqrt(pow(target2_x, 2) + pow(target2_y, 2));
+            targets[targetCount].angle = atan2(target2_y, target2_x) * 180.0 / PI;
+            targets[targetCount].energy = 0;
+            targets[targetCount].status = 1;
+            targetCount++;
+            radarDataFrame.Radar_2 = 1;
+        }
+        else
+        {
+            radarDataFrame.Radar_2 = 0;
+        }
+    }
+    
+    // Check for target 3 (offsets 16-21)
+    if (radarDataFrame.RX_count > 21)
+    {
+        int16_t target3_x = getSignedValue(RX_BUF[16], RX_BUF[17]);
+        int16_t target3_y = getSignedValue(RX_BUF[18], RX_BUF[19]);
+        int16_t target3_speed = getSignedValue(RX_BUF[20], RX_BUF[21]);
+        
+        if (target3_x != 0 || target3_y != 0)
+        {
+            targets[targetCount].targetId = 3;
+            targets[targetCount].x = target3_x;
+            targets[targetCount].y = target3_y;
+            targets[targetCount].velocity = target3_speed;
+            targets[targetCount].distance = sqrt(pow(target3_x, 2) + pow(target3_y, 2));
+            targets[targetCount].angle = atan2(target3_y, target3_x) * 180.0 / PI;
+            targets[targetCount].energy = 0;
+            targets[targetCount].status = 1;
+            targetCount++;
+            radarDataFrame.Radar_3 = 1;
+        }
+        else
+        {
+            radarDataFrame.Radar_3 = 0;
+        }
+    }
+    
+    // Set frame type based on target count
+    if (targetCount == 1)
+    {
+        lastFrameType = TARGET_DATA;
+    }
+    else if (targetCount > 1)
+    {
+        lastFrameType = MULTI_TARGET_DATA;
+    }
+    else
+    {
+        lastFrameType = UNIDENTIFIED_FRAME;
+    }
+}
+
 int16_t AiThinker_RD_03D::getSignedValue(uint8_t low, uint8_t high) const
 {
     uint16_t raw_val = (high << 8) | low;
-    // Sign-magnitude conversion
+    
+    // Based on blog comments - correct sign-magnitude conversion
+    // The 16th bit indicates the sign, lower 15 bits are the magnitude
     int16_t magnitude = raw_val & 0x7FFF;
+    
+    // If the sign bit (15th bit) is set, the value is negative
     if (raw_val & 0x8000) {
         return -magnitude;
     }
@@ -221,55 +254,44 @@ int AiThinker_RD_03D::readUntilHeader()
 
 bool AiThinker_RD_03D::enterConfigMode()
 {
-    if (inConfigMode) return true;
-    
-    clearRxBuffer();
-    bool success = sendCommand(ENTER_CONFIG_MODE);
-    if (success)
-    {
-        inConfigMode = true;
-        R_LOG_INFO("Entered configuration mode\n");
-    }
-    return success;
+    // Blog implementation doesn't use config mode - commands are sent directly
+    inConfigMode = false;
+    R_LOG_INFO("Direct command mode (no config mode needed)\n");
+    return true;
 }
 
 bool AiThinker_RD_03D::exitConfigMode()
 {
-    if (!inConfigMode) return true;
-    
-    bool success = sendCommand(EXIT_CONFIG_MODE);
-    if (success)
-    {
-        inConfigMode = false;
-        R_LOG_INFO("Exited configuration mode\n");
-    }
-    return success;
+    // Blog implementation doesn't use config mode
+    inConfigMode = false;
+    R_LOG_INFO("Direct command mode (no config mode needed)\n");
+    return true;
 }
 
 bool AiThinker_RD_03D::setSingleTargetMode()
 {
-    if (!inConfigMode && !enterConfigMode()) return false;
+    clearRxBuffer();
     
-    bool success = sendCommand(SET_SINGLE_TARGET_MODE);
-    if (success)
-    {
-        currentMode = SINGLE_TARGET_MODE;
-        R_LOG_INFO("Set to single target mode\n");
-    }
-    return success;
+    // Send the exact command sequence from the blog
+    radarUART->write(Single_Target_Detection_CMD, 15);
+    delay(interCommandDelay);
+    
+    currentMode = SINGLE_TARGET_MODE;
+    R_LOG_INFO("Set to single target mode\n");
+    return true;
 }
 
 bool AiThinker_RD_03D::setMultiTargetMode()
 {
-    if (!inConfigMode && !enterConfigMode()) return false;
+    clearRxBuffer();
     
-    bool success = sendCommand(SET_MULTI_TARGET_MODE);
-    if (success)
-    {
-        currentMode = MULTI_TARGET_MODE;
-        R_LOG_INFO("Set to multi-target mode\n");
-    }
-    return success;
+    // Send the exact command sequence from the blog
+    radarUART->write(Multi_Target_Detection_CMD, 15);
+    delay(interCommandDelay);
+    
+    currentMode = MULTI_TARGET_MODE;
+    R_LOG_INFO("Set to multi-target mode\n");
+    return true;
 }
 
 bool AiThinker_RD_03D::setDebugMode()
