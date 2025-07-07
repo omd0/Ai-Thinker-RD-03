@@ -82,24 +82,110 @@ int AiThinker_RD_03D::read()
         uint8_t c = radarUART->read();
         rc++;
         
-        // Store in RX_BUF following the blog implementation
         radarDataFrame.RX_BUF[radarDataFrame.RX_count] = c;
         radarDataFrame.RX_count++;
         
-        // Reset buffer if it gets too full
         if (radarDataFrame.RX_count >= 64)
         {
             radarDataFrame.RX_count = 0;
         }
         
-        // Look for complete frame - blog shows frames end with specific patterns
-        // Check if we have enough data for a complete frame (minimum 22 bytes for multi-target)
         if (radarDataFrame.RX_count >= 22)
         {
-            // Parse the frame according to blog format
-            parseDataFrame();
+            uint8_t* RX_BUF = radarDataFrame.RX_BUF;
+    
+            targetCount = 0;
+            
+            if (radarDataFrame.RX_count > 9)
+            {
+                int16_t target1_x = getSignedValue(RX_BUF[4], RX_BUF[5]);
+                int16_t target1_y = getSignedValue(RX_BUF[6], RX_BUF[7]);
+                int16_t target1_speed = getSignedValue(RX_BUF[8], RX_BUF[9]);
+                
+                if (target1_x != 0 || target1_y != 0)
+                {
+                    targets[targetCount].targetId = 1;
+                    targets[targetCount].x = target1_x;
+                    targets[targetCount].y = target1_y;
+                    targets[targetCount].velocity = target1_speed;
+                    targets[targetCount].distance = sqrt(pow(target1_x, 2) + pow(target1_y, 2));
+                    targets[targetCount].angle = atan2(target1_y, target1_x) * 180.0 / PI;
+                    targets[targetCount].energy = 0;
+                    targets[targetCount].status = 1;
+                    targetCount++;
+                    radarDataFrame.Radar_1 = 1;
+                }
+                else
+                {
+                    radarDataFrame.Radar_1 = 0;
+                }
+            }
+            
+            if (radarDataFrame.RX_count > 15)
+            {
+                int16_t target2_x = getSignedValue(RX_BUF[10], RX_BUF[11]);
+                int16_t target2_y = getSignedValue(RX_BUF[12], RX_BUF[13]);
+                int16_t target2_speed = getSignedValue(RX_BUF[14], RX_BUF[15]);
+                
+                if (target2_x != 0 || target2_y != 0)
+                {
+                    targets[targetCount].targetId = 2;
+                    targets[targetCount].x = target2_x;
+                    targets[targetCount].y = target2_y;
+                    targets[targetCount].velocity = target2_speed;
+                    targets[targetCount].distance = sqrt(pow(target2_x, 2) + pow(target2_y, 2));
+                    targets[targetCount].angle = atan2(target2_y, target2_x) * 180.0 / PI;
+                    targets[targetCount].energy = 0;
+                    targets[targetCount].status = 1;
+                    targetCount++;
+                    radarDataFrame.Radar_2 = 1;
+                }
+                else
+                {
+                    radarDataFrame.Radar_2 = 0;
+                }
+            }
+            
+            if (radarDataFrame.RX_count > 21)
+            {
+                int16_t target3_x = getSignedValue(RX_BUF[16], RX_BUF[17]);
+                int16_t target3_y = getSignedValue(RX_BUF[18], RX_BUF[19]);
+                int16_t target3_speed = getSignedValue(RX_BUF[20], RX_BUF[21]);
+                
+                if (target3_x != 0 || target3_y != 0)
+                {
+                    targets[targetCount].targetId = 3;
+                    targets[targetCount].x = target3_x;
+                    targets[targetCount].y = target3_y;
+                    targets[targetCount].velocity = target3_speed;
+                    targets[targetCount].distance = sqrt(pow(target3_x, 2) + pow(target3_y, 2));
+                    targets[targetCount].angle = atan2(target3_y, target3_x) * 180.0 / PI;
+                    targets[targetCount].energy = 0;
+                    targets[targetCount].status = 1;
+                    targetCount++;
+                    radarDataFrame.Radar_3 = 1;
+                }
+                else
+                {
+                    radarDataFrame.Radar_3 = 0;
+                }
+            }
+            
+            if (targetCount == 1)
+            {
+                lastFrameType = TARGET_DATA;
+            }
+            else if (targetCount > 1)
+            {
+                lastFrameType = MULTI_TARGET_DATA;
+            }
+            else
+            {
+                lastFrameType = UNIDENTIFIED_FRAME;
+            }
+
             frameAvailable = true;
-            radarDataFrame.RX_count = 0; // Reset for next frame
+            radarDataFrame.RX_count = 0;
         }
     }
     
@@ -108,121 +194,16 @@ int AiThinker_RD_03D::read()
 
 void AiThinker_RD_03D::parseDataFrame()
 {
-    uint8_t* RX_BUF = radarDataFrame.RX_BUF;
-    
-    // Reset target count
-    targetCount = 0;
-    
-    // Parse according to blog implementation
-    // The blog shows target data starting at specific offsets
-    
-    // Check for target 1 (offsets 4-9 for x, y, speed)
-    if (radarDataFrame.RX_count > 9)
-    {
-        int16_t target1_x = getSignedValue(RX_BUF[4], RX_BUF[5]);
-        int16_t target1_y = getSignedValue(RX_BUF[6], RX_BUF[7]);
-        int16_t target1_speed = getSignedValue(RX_BUF[8], RX_BUF[9]);
-        
-        // Check if target 1 is valid (non-zero coordinates)
-        if (target1_x != 0 || target1_y != 0)
-        {
-            targets[targetCount].targetId = 1;
-            targets[targetCount].x = target1_x;
-            targets[targetCount].y = target1_y;
-            targets[targetCount].velocity = target1_speed;
-            targets[targetCount].distance = sqrt(pow(target1_x, 2) + pow(target1_y, 2));
-            targets[targetCount].angle = atan2(target1_y, target1_x) * 180.0 / PI;
-            targets[targetCount].energy = 0;
-            targets[targetCount].status = 1;
-            targetCount++;
-            radarDataFrame.Radar_1 = 1;
-        }
-        else
-        {
-            radarDataFrame.Radar_1 = 0;
-        }
-    }
-    
-    // Check for target 2 (offsets 10-15)
-    if (radarDataFrame.RX_count > 15)
-    {
-        int16_t target2_x = getSignedValue(RX_BUF[10], RX_BUF[11]);
-        int16_t target2_y = getSignedValue(RX_BUF[12], RX_BUF[13]);
-        int16_t target2_speed = getSignedValue(RX_BUF[14], RX_BUF[15]);
-        
-        if (target2_x != 0 || target2_y != 0)
-        {
-            targets[targetCount].targetId = 2;
-            targets[targetCount].x = target2_x;
-            targets[targetCount].y = target2_y;
-            targets[targetCount].velocity = target2_speed;
-            targets[targetCount].distance = sqrt(pow(target2_x, 2) + pow(target2_y, 2));
-            targets[targetCount].angle = atan2(target2_y, target2_x) * 180.0 / PI;
-            targets[targetCount].energy = 0;
-            targets[targetCount].status = 1;
-            targetCount++;
-            radarDataFrame.Radar_2 = 1;
-        }
-        else
-        {
-            radarDataFrame.Radar_2 = 0;
-        }
-    }
-    
-    // Check for target 3 (offsets 16-21)
-    if (radarDataFrame.RX_count > 21)
-    {
-        int16_t target3_x = getSignedValue(RX_BUF[16], RX_BUF[17]);
-        int16_t target3_y = getSignedValue(RX_BUF[18], RX_BUF[19]);
-        int16_t target3_speed = getSignedValue(RX_BUF[20], RX_BUF[21]);
-        
-        if (target3_x != 0 || target3_y != 0)
-        {
-            targets[targetCount].targetId = 3;
-            targets[targetCount].x = target3_x;
-            targets[targetCount].y = target3_y;
-            targets[targetCount].velocity = target3_speed;
-            targets[targetCount].distance = sqrt(pow(target3_x, 2) + pow(target3_y, 2));
-            targets[targetCount].angle = atan2(target3_y, target3_x) * 180.0 / PI;
-            targets[targetCount].energy = 0;
-            targets[targetCount].status = 1;
-            targetCount++;
-            radarDataFrame.Radar_3 = 1;
-        }
-        else
-        {
-            radarDataFrame.Radar_3 = 0;
-        }
-    }
-    
-    // Set frame type based on target count
-    if (targetCount == 1)
-    {
-        lastFrameType = TARGET_DATA;
-    }
-    else if (targetCount > 1)
-    {
-        lastFrameType = MULTI_TARGET_DATA;
-    }
-    else
-    {
-        lastFrameType = UNIDENTIFIED_FRAME;
-    }
+    // This function is now empty as its logic has been moved to the read() method.
+    // It is kept for now to avoid breaking other parts of the library that might call it.
 }
 
 int16_t AiThinker_RD_03D::getSignedValue(uint8_t low, uint8_t high) const
 {
     uint16_t raw_val = (high << 8) | low;
     
-    // Based on blog comments - correct sign-magnitude conversion
-    // The 16th bit indicates the sign, lower 15 bits are the magnitude
-    int16_t magnitude = raw_val & 0x7FFF;
-    
-    // If the sign bit (15th bit) is set, the value is negative
-    if (raw_val & 0x8000) {
-        return -magnitude;
-    }
-    return magnitude;
+    // Convert to signed 16-bit integer (two's complement)
+    return (int16_t)raw_val;
 }
 
 int AiThinker_RD_03D::readUntilHeader()
