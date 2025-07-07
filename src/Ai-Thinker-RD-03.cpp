@@ -272,10 +272,46 @@ void AiThinker_RD_03D::initRadarDataFrame()
 bool AiThinker_RD_03D::begin(HardwareSerial& rSerial, int rxPin, int txPin, int rxBufferSize)
 {
     radarUART = &rSerial;
-    radarUART->setRxBufferSize(rxBufferSize);
-    // RD-03D uses 256000 baud rate according to documentation
-    radarUART->begin(256000, SERIAL_8N1, rxPin, txPin);
+    
+    // Set buffer size if the platform supports it
+#if defined(ARDUINO_ARCH_ESP32) || defined(ARDUINO_ARCH_ESP8266)
+    rSerial.setRxBufferSize(rxBufferSize);
+#endif
+    
+    // Initialize hardware serial with platform-specific parameters
+#if defined(ARDUINO_ARCH_ESP32) || defined(ARDUINO_ARCH_ESP8266)
+    // ESP32/ESP8266 can specify pins
+    rSerial.begin(256000, SERIAL_8N1, rxPin, txPin);
+#else
+    // Other platforms use default pins
+    rSerial.begin(256000);
+#endif
+    
     init();
+    R_LOG_INFO("Radar initialized with Hardware Serial on %s platform\n", PLATFORM_NAME);
+    return true;
+}
+
+#ifdef PLATFORM_HAS_SOFTWARE_SERIAL
+bool AiThinker_RD_03D::begin(SoftwareSerial& rSerial, int rxBufferSize)
+{
+    radarUART = &rSerial;
+    
+    // Software serial initialization
+    rSerial.begin(256000);
+    
+    init();
+    R_LOG_INFO("Radar initialized with Software Serial on %s platform\n", PLATFORM_NAME);
+    return true;
+}
+#endif
+
+bool AiThinker_RD_03D::begin(Stream& rSerial, int rxBufferSize)
+{
+    radarUART = &rSerial;
+    
+    init();
+    R_LOG_INFO("Radar initialized with Stream interface on %s platform\n", PLATFORM_NAME);
     return true;
 }
 

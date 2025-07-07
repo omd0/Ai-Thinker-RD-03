@@ -1,17 +1,29 @@
 /*
-  RD-03D Data Frame Example for PlatformIO
-  Demonstrates the new data frame parsing capabilities of the Ai-Thinker RD-03D library
+  RD-03D Cross-Platform Example for PlatformIO
+  Demonstrates automatic platform detection and cross-platform compatibility
   
   This example shows how to:
-  - Initialize the RD-03D radar sensor
+  - Automatically detect platform and configure serial interface
+  - Initialize the RD-03D radar sensor on any supported platform
   - Switch between single and multi-target detection modes
   - Parse target coordinates (X, Y) and calculate distance/angle
   - Display target information including velocity
   - Handle different frame types and error conditions
   
   Hardware Connections:
-  - RD-03D TX -> ESP32 RX (Pin 16)
-  - RD-03D RX -> ESP32 TX (Pin 17)
+  ESP32:
+  - RD-03D TX -> GPIO 16 (RX)
+  - RD-03D RX -> GPIO 17 (TX)
+  
+  ESP8266:
+  - RD-03D TX -> GPIO 13 (RX) 
+  - RD-03D RX -> GPIO 15 (TX)
+  
+  STM32:
+  - RD-03D TX -> PA10 (USART1_RX)
+  - RD-03D RX -> PA9  (USART1_TX)
+  
+  Common:
   - RD-03D VCC -> 3.3V
   - RD-03D GND -> GND
   
@@ -25,9 +37,25 @@
 // Create RD-03D instance
 AiThinker_RD_03D radar;
 
-// Pin definitions for ESP32
-const int RX_PIN = 16;
-const int TX_PIN = 17;
+// Platform-specific pin definitions and serial selection
+#if defined(ARDUINO_ARCH_ESP32)
+  const int RX_PIN = 16;
+  const int TX_PIN = 17;
+  #define RADAR_SERIAL Serial2
+#elif defined(ARDUINO_ARCH_ESP8266)
+  const int RX_PIN = 13;
+  const int TX_PIN = 15;
+  #define RADAR_SERIAL Serial
+#elif defined(ARDUINO_ARCH_STM32)
+  const int RX_PIN = PA10;
+  const int TX_PIN = PA9;
+  #define RADAR_SERIAL Serial1
+#else
+  // Default configuration for other platforms
+  const int RX_PIN = 16;
+  const int TX_PIN = 17;
+  #define RADAR_SERIAL Serial1
+#endif
 
 // Detection mode
 bool multiTargetMode = true;
@@ -54,12 +82,26 @@ void setup() {
     delay(10);
   }
   
-  Serial.println("RD-03D Data Frame Example for PlatformIO");
-  Serial.println("==========================================");
+  Serial.println("RD-03D Cross-Platform Example for PlatformIO");
+  Serial.println("==============================================");
   
-  // Initialize radar sensor
-  if (radar.begin(Serial2, RX_PIN, TX_PIN)) {
-    Serial.println("RD-03D initialized successfully");
+  // Display platform information
+  Serial.print("Platform: ");
+  Serial.println(AiThinker_RD_03D::getPlatformName());
+  Serial.print("Hardware Serial Support: ");
+  Serial.println(AiThinker_RD_03D::hasHardwareSerial() ? "Yes" : "No");
+  Serial.print("Software Serial Support: ");
+  Serial.println(AiThinker_RD_03D::hasSoftwareSerial() ? "Yes" : "No");
+  Serial.println();
+  
+  // Initialize radar sensor with platform-appropriate configuration
+  Serial.print("Initializing radar on ");
+  Serial.print(AiThinker_RD_03D::getPlatformName());
+  Serial.println("...");
+  
+  if (radar.begin(RADAR_SERIAL, RX_PIN, TX_PIN)) {
+    Serial.print("RD-03D initialized successfully on ");
+    Serial.println(AiThinker_RD_03D::getPlatformName());
   } else {
     Serial.println("Failed to initialize RD-03D");
     while (1) {

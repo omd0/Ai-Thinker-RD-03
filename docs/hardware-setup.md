@@ -1,15 +1,37 @@
 # Hardware Setup Guide
 
-Complete guide for setting up the Ai-Thinker RD-03D radar sensor with ESP32.
+Complete guide for setting up the Ai-Thinker RD-03D radar sensor with any supported Arduino-compatible platform. The library automatically detects your platform and configures the optimal connection method.
 
 ## 📋 Required Components
 
 ### Essential Components
-- **ESP32 Development Board** (ESP32 DevKit, NodeMCU-32S, etc.)
+- **Arduino-Compatible Board** (ESP32, ESP8266, Arduino Uno/Nano/Mega, STM32, etc.)
 - **Ai-Thinker RD-03D Radar Sensor**
-- **Jumper Wires** (4 pieces)
-- **USB Cable** (for programming ESP32)
+- **Jumper Wires** (4 pieces minimum)
+- **USB Cable** (for programming)
 - **Breadboard** (optional, for prototyping)
+
+### Platform-Specific Requirements
+
+#### ESP32/ESP8266
+- **Hardware Serial**: Multiple UARTs available
+- **Pin Flexibility**: Custom pin assignment supported
+- **Power**: 3.3V compatible
+
+#### Arduino Uno/Nano
+- **SoftwareSerial**: Required for sensor communication
+- **Pin Limitation**: Uses digital pins 2/3 by default
+- **Power**: 3.3V level shifter may be needed
+
+#### Arduino Mega
+- **Hardware Serial**: Serial1-3 available
+- **Pin Options**: Multiple UART pin choices
+- **Power**: 3.3V compatible
+
+#### STM32
+- **Hardware Serial**: Multiple UARTs available
+- **Pin Mapping**: Platform-specific pin assignments
+- **Power**: 3.3V compatible
 
 ### Optional Components
 - **3.3V Power Supply** (if not using USB power)
@@ -17,9 +39,11 @@ Complete guide for setting up the Ai-Thinker RD-03D radar sensor with ESP32.
 - **Mounting Hardware** (screws, brackets)
 - **Extension Cables** (for remote mounting)
 
-## 🔌 Pin Connections
+## 🔌 Platform-Specific Pin Connections
 
-### Basic Wiring Diagram
+The library automatically detects your platform and configures the optimal connection method. Choose the wiring diagram for your specific board:
+
+### ESP32 Wiring
 
 ```
 ESP32 DevKit          RD-03D Radar Sensor
@@ -36,14 +60,98 @@ ESP32 DevKit          RD-03D Radar Sensor
 └─────────────┘      └─────────────┘
 ```
 
-### Detailed Pin Mapping
+**Code:** `radar.begin(Serial2, 16, 17);`
 
-| ESP32 Pin | RD-03D Pin | Description | Wire Color |
-|-----------|------------|-------------|------------|
-| 3.3V      | VCC        | Power supply | Red |
-| GND       | GND        | Ground       | Black |
-| GPIO 16   | TX         | Radar data   | Green |
-| GPIO 17   | RX         | Radar commands| Blue |
+### ESP8266 Wiring
+
+```
+ESP8266 NodeMCU       RD-03D Radar Sensor
+┌─────────────┐      ┌─────────────┐
+│             │      │             │
+│ 3.3V ──────┼──────┤ VCC         │
+│             │      │             │
+│ GND ───────┼──────┤ GND         │
+│             │      │             │
+│ GPIO 13 ───┼──────┤ TX          │
+│             │      │             │
+│ GPIO 15 ───┼──────┤ RX          │
+│             │      │             │
+└─────────────┘      └─────────────┘
+```
+
+**Code:** `radar.begin(Serial, 13, 15);`
+
+### Arduino Uno/Nano Wiring
+
+```
+Arduino Uno           RD-03D Radar Sensor
+┌─────────────┐      ┌─────────────┐
+│             │      │             │
+│ 3.3V ──────┼──────┤ VCC         │
+│             │      │             │
+│ GND ───────┼──────┤ GND         │
+│             │      │             │
+│ Pin 2 ─────┼──────┤ TX          │
+│             │      │             │
+│ Pin 3 ─────┼──────┤ RX          │
+│             │      │             │
+└─────────────┘      └─────────────┘
+```
+
+**Code:** 
+```cpp
+#include <SoftwareSerial.h>
+SoftwareSerial radarSerial(2, 3);
+radar.begin(radarSerial);
+```
+
+### Arduino Mega Wiring
+
+```
+Arduino Mega          RD-03D Radar Sensor
+┌─────────────┐      ┌─────────────┐
+│             │      │             │
+│ 3.3V ──────┼──────┤ VCC         │
+│             │      │             │
+│ GND ───────┼──────┤ GND         │
+│             │      │             │
+│ Pin 19 ────┼──────┤ TX          │
+│             │      │             │
+│ Pin 18 ────┼──────┤ RX          │
+│             │      │             │
+└─────────────┘      └─────────────┘
+```
+
+**Code:** `radar.begin(Serial1, 19, 18);`
+
+### STM32 Wiring
+
+```
+STM32 Board           RD-03D Radar Sensor
+┌─────────────┐      ┌─────────────┐
+│             │      │             │
+│ 3.3V ──────┼──────┤ VCC         │
+│             │      │             │
+│ GND ───────┼──────┤ GND         │
+│             │      │             │
+│ PA10 ──────┼──────┤ TX          │
+│             │      │             │
+│ PA9 ───────┼──────┤ RX          │
+│             │      │             │
+└─────────────┘      └─────────────┘
+```
+
+**Code:** `radar.begin(Serial1, PA10, PA9);`
+
+### Universal Pin Mapping Table
+
+| Platform | VCC | GND | RX Pin | TX Pin | Serial Interface | Code Example |
+|----------|-----|-----|--------|--------|------------------|--------------|
+| ESP32 | 3.3V | GND | GPIO 16 | GPIO 17 | Serial2 | `radar.begin(Serial2, 16, 17)` |
+| ESP8266 | 3.3V | GND | GPIO 13 | GPIO 15 | Serial | `radar.begin(Serial, 13, 15)` |
+| Uno/Nano | 3.3V | GND | Pin 2 | Pin 3 | SoftwareSerial | `radar.begin(radarSerial)` |
+| Mega | 3.3V | GND | Pin 19 | Pin 18 | Serial1 | `radar.begin(Serial1, 19, 18)` |
+| STM32 | 3.3V | GND | PA10 | PA9 | Serial1 | `radar.begin(Serial1, PA10, PA9)` |
 
 ### Alternative Pin Configurations
 
@@ -130,7 +238,7 @@ radar.begin(Serial1, 16, 17);
 
 ## 🔍 Testing the Setup
 
-### Basic Connection Test
+### Universal Connection Test
 ```cpp
 #include "Ai-Thinker-RD-03.h"
 
@@ -138,9 +246,32 @@ AiThinker_RD_03D radar;
 
 void setup() {
     Serial.begin(115200);
-    Serial.println("Testing radar connections...");
+    delay(1000);
     
-    if (radar.begin(Serial2, 16, 17)) {
+    Serial.println("Testing radar connections...");
+    Serial.print("Platform: ");
+    Serial.println(AiThinker_RD_03D::getPlatformName());
+    
+    bool success = false;
+    
+    // Platform-specific initialization
+    #if defined(ARDUINO_ARCH_ESP32)
+        success = radar.begin(Serial2, 16, 17);
+    #elif defined(ARDUINO_ARCH_ESP8266)
+        success = radar.begin(Serial, 13, 15);
+    #elif defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1280__)
+        success = radar.begin(Serial1, 19, 18);
+    #elif defined(ARDUINO_ARCH_AVR)
+        #include <SoftwareSerial.h>
+        SoftwareSerial radarSerial(2, 3);
+        success = radar.begin(radarSerial);
+    #elif defined(ARDUINO_ARCH_STM32)
+        success = radar.begin(Serial1, PA10, PA9);
+    #else
+        success = radar.begin(Serial1, -1, -1);
+    #endif
+    
+    if (success) {
         Serial.println("✅ Radar connected successfully");
     } else {
         Serial.println("❌ Radar connection failed");

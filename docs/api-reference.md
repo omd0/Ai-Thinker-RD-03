@@ -6,6 +6,7 @@ Complete API documentation for the Ai-Thinker RD-03D radar library.
 
 - [Class Overview](#class-overview)
 - [Constructor](#constructor)
+- [Platform Detection](#platform-detection)
 - [Initialization](#initialization)
 - [Configuration Methods](#configuration-methods)
 - [Detection Control](#detection-control)
@@ -42,29 +43,182 @@ AiThinker_RD_03D radar;
 - Max distance: 500cm
 - Max velocity: 25cm/s
 
+## 🌐 Platform Detection
+
+The library automatically detects the Arduino platform and configures the appropriate serial interface.
+
+### Supported Platforms
+
+- **ESP32** - Multiple hardware serial ports, custom pin assignment
+- **ESP8266** - Hardware serial + SoftwareSerial support  
+- **Arduino AVR** (Uno/Nano/Mega) - Hardware + SoftwareSerial support
+- **STM32** - Multiple hardware serial ports
+- **SAMD** (Arduino Zero) - Hardware serial support
+- **Generic** platforms - Configurable fallback
+
+### Platform Information Methods
+
+#### getPlatformName()
+Returns the detected platform name.
+
+```cpp
+static const char* getPlatformName();
+```
+
+**Returns:** Platform name string ("ESP32", "ESP8266", "AVR", "STM32", "SAMD", "Generic")
+
+**Example:**
+```cpp
+Serial.print("Platform: ");
+Serial.println(AiThinker_RD_03D::getPlatformName());
+```
+
+#### hasHardwareSerial()
+Checks if the platform supports hardware serial.
+
+```cpp
+static bool hasHardwareSerial();
+```
+
+**Returns:** `true` if hardware serial is supported, `false` otherwise
+
+#### hasSoftwareSerial()
+Checks if the platform supports software serial.
+
+```cpp
+static bool hasSoftwareSerial();
+```
+
+**Returns:** `true` if software serial is supported, `false` otherwise
+
+**Example:**
+```cpp
+if (AiThinker_RD_03D::hasHardwareSerial()) {
+    Serial.println("Using hardware serial");
+} else if (AiThinker_RD_03D::hasSoftwareSerial()) {
+    Serial.println("Using software serial");
+}
+```
+
 ## 🚀 Initialization
 
-### begin()
-Initializes the radar sensor with UART communication.
+The library provides multiple initialization methods for different serial interfaces and platforms.
+
+### begin() - Hardware Serial
+Initializes the radar sensor with hardware serial communication.
 
 ```cpp
 bool begin(HardwareSerial& rSerial, int rxPin, int txPin, int rxBufferSize = 2048);
 ```
 
 **Parameters:**
-- `rSerial`: Hardware serial instance (e.g., Serial2)
-- `rxPin`: ESP32 GPIO pin for receiving data
-- `txPin`: ESP32 GPIO pin for transmitting data
+- `rSerial`: Hardware serial instance (e.g., Serial1, Serial2)
+- `rxPin`: GPIO pin for receiving data (platform-dependent)
+- `txPin`: GPIO pin for transmitting data (platform-dependent)
 - `rxBufferSize`: Size of receive buffer (default: 2048)
 
 **Returns:** `true` if initialization successful, `false` otherwise
 
+**Platform Behavior:**
+- **ESP32/ESP8266**: Custom pin assignment supported
+- **Other platforms**: Uses default serial pins, ignores pin parameters
+
 **Example:**
 ```cpp
+// ESP32 with custom pins
 if (radar.begin(Serial2, 16, 17)) {
-    Serial.println("Radar initialized successfully");
-} else {
-    Serial.println("Failed to initialize radar");
+    Serial.println("Radar initialized on ESP32");
+}
+
+// Arduino Mega with Serial1
+if (radar.begin(Serial1, 19, 18)) {
+    Serial.println("Radar initialized on Mega");
+}
+```
+
+### begin() - Software Serial
+Initializes the radar sensor with software serial communication (AVR/ESP8266 only).
+
+```cpp
+bool begin(SoftwareSerial& rSerial, int rxBufferSize = 2048);
+```
+
+**Parameters:**
+- `rSerial`: SoftwareSerial instance
+- `rxBufferSize`: Size of receive buffer (default: 2048)
+
+**Returns:** `true` if initialization successful, `false` otherwise
+
+**Platform Support:** Arduino AVR, ESP8266
+
+**Example:**
+```cpp
+#include <SoftwareSerial.h>
+SoftwareSerial radarSerial(2, 3); // RX, TX pins
+
+if (radar.begin(radarSerial)) {
+    Serial.println("Radar initialized with SoftwareSerial");
+}
+```
+
+### begin() - Stream Interface
+Initializes the radar sensor with any Stream-compatible interface.
+
+```cpp
+bool begin(Stream& rSerial, int rxBufferSize = 2048);
+```
+
+**Parameters:**
+- `rSerial`: Any Stream-derived object
+- `rxBufferSize`: Size of receive buffer (default: 2048)
+
+**Returns:** `true` if initialization successful, `false` otherwise
+
+**Use Cases:** Custom serial implementations, debugging, testing
+
+**Example:**
+```cpp
+// Using with any Stream object
+CustomSerial mySerial;
+if (radar.begin(mySerial)) {
+    Serial.println("Radar initialized with custom stream");
+}
+```
+
+### Cross-Platform Example
+```cpp
+void setup() {
+    Serial.begin(115200);
+    
+    // Platform detection happens automatically
+    Serial.print("Platform: ");
+    Serial.println(AiThinker_RD_03D::getPlatformName());
+    
+    bool success = false;
+    
+    #if defined(ARDUINO_ARCH_ESP32)
+        // ESP32 - use Serial2 with custom pins
+        success = radar.begin(Serial2, 16, 17);
+    #elif defined(ARDUINO_ARCH_ESP8266)  
+        // ESP8266 - use Serial with custom pins
+        success = radar.begin(Serial, 13, 15);
+    #elif defined(__AVR_ATmega2560__)
+        // Arduino Mega - use Serial1
+        success = radar.begin(Serial1, 19, 18);
+    #elif defined(ARDUINO_ARCH_AVR)
+        // Arduino Uno/Nano - use SoftwareSerial
+        SoftwareSerial radarSerial(2, 3);
+        success = radar.begin(radarSerial);
+    #else
+        // Generic platform
+        success = radar.begin(Serial1, -1, -1);
+    #endif
+    
+    if (success) {
+        Serial.println("Radar initialized successfully!");
+    } else {
+        Serial.println("Failed to initialize radar");
+    }
 }
 ```
 

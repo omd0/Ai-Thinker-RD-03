@@ -41,6 +41,46 @@ https://github.com/Gjorgjevikj/...todo
 #define _AI_THINKER_RD_03D_H
 #include <Arduino.h>
 
+// Platform detection and serial support
+#if defined(ARDUINO_ARCH_ESP32)
+    // ESP32 has multiple hardware serial ports
+    #define PLATFORM_HAS_HARDWARE_SERIAL
+    #define PLATFORM_NAME "ESP32"
+#elif defined(ARDUINO_ARCH_ESP8266)
+    // ESP8266 has limited hardware serial
+    #define PLATFORM_HAS_HARDWARE_SERIAL
+    #define PLATFORM_NAME "ESP8266"
+#elif defined(ARDUINO_ARCH_AVR)
+    // AVR boards like Arduino Uno, Nano, etc.
+    #define PLATFORM_NAME "AVR"
+    #if defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1280__)
+        // Arduino Mega has multiple hardware serial ports
+        #define PLATFORM_HAS_HARDWARE_SERIAL
+    #elif defined(__AVR_ATmega328P__) || defined(__AVR_ATmega168__)
+        // Arduino Uno/Nano have limited hardware serial
+        #define PLATFORM_HAS_HARDWARE_SERIAL
+        #define PLATFORM_LIMITED_HARDWARE_SERIAL
+    #endif
+#elif defined(ARDUINO_ARCH_STM32)
+    // STM32 boards
+    #define PLATFORM_HAS_HARDWARE_SERIAL
+    #define PLATFORM_NAME "STM32"
+#elif defined(ARDUINO_ARCH_SAMD)
+    // SAMD boards like Arduino Zero
+    #define PLATFORM_HAS_HARDWARE_SERIAL
+    #define PLATFORM_NAME "SAMD"
+#else
+    // Generic Arduino platform
+    #define PLATFORM_NAME "Generic"
+    #define PLATFORM_HAS_HARDWARE_SERIAL
+#endif
+
+// Include SoftwareSerial for platforms that support it
+#if defined(ARDUINO_ARCH_AVR) || defined(ARDUINO_ARCH_ESP8266)
+    #include <SoftwareSerial.h>
+    #define PLATFORM_HAS_SOFTWARE_SERIAL
+#endif
+
 #define AI_THINKER_RD_03D_LIB_VERSION 1.0
 
 #ifndef _LOG_LEVEL 
@@ -248,8 +288,33 @@ public:
     // Constructor
     AiThinker_RD_03D();
 
-    // Initialize the radar module
+    // Initialize the radar module with Hardware Serial
     bool begin(HardwareSerial& rSerial, int rxPin, int txPin, int rxBufferSize = 2048);
+    
+#ifdef PLATFORM_HAS_SOFTWARE_SERIAL
+    // Initialize the radar module with Software Serial
+    bool begin(SoftwareSerial& rSerial, int rxBufferSize = 2048);
+#endif
+    
+    // Initialize the radar module with any Stream (advanced users)
+    bool begin(Stream& rSerial, int rxBufferSize = 2048);
+    
+    // Platform information
+    static const char* getPlatformName() { return PLATFORM_NAME; }
+    static bool hasHardwareSerial() { 
+#ifdef PLATFORM_HAS_HARDWARE_SERIAL
+        return true;
+#else
+        return false;
+#endif
+    }
+    static bool hasSoftwareSerial() { 
+#ifdef PLATFORM_HAS_SOFTWARE_SERIAL
+        return true;
+#else
+        return false;
+#endif
+    }
 
     // Configuration methods
     bool enterConfigMode();
@@ -325,7 +390,7 @@ private:
     void swapBuffers();
 
     // Member variables
-    HardwareSerial* radarUART;
+    Stream* radarUART;
     uint8_t receiveBuffer[2][RECEIVE_BUFFER_SIZE];
     uint8_t* bufferCurrentFrame;
     uint8_t* bufferLastFrame;

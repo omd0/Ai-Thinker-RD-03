@@ -6,8 +6,8 @@ Welcome to the comprehensive documentation for the Ai-Thinker RD-03D 24GHz FMCW 
 
 ### Getting Started
 - [Installation Guide](installation.md) - How to install and set up the library
-- [Quick Start Guide](quick-start.md) - Get up and running in minutes
-- [Hardware Setup](hardware-setup.md) - Wiring and hardware connections
+- [Platform Support](platform-support.md) - Cross-platform compatibility and automatic detection
+- [Hardware Setup](hardware-setup.md) - Platform-specific wiring and connections
 
 ### API Reference
 - [Library API Reference](api-reference.md) - Complete API documentation
@@ -55,16 +55,19 @@ The Ai-Thinker RD-03D is a 24GHz Frequency Modulated Continuous Wave (FMCW) rada
 - **Targets**: Up to 3 simultaneous targets
 
 ### Hardware Support
-- **ESP32**: Full support with optimized performance
-- **Arduino**: Compatible with Arduino framework
-- **PlatformIO**: Ready-to-use project templates
+- **ESP32**: Full support with multiple UARTs and custom pins
+- **ESP8266**: Hardware + software serial support
+- **Arduino AVR**: Uno/Nano/Mega with automatic serial selection
+- **STM32**: Multiple hardware UARTs with pin mapping
+- **SAMD**: Arduino Zero/MKR board support
+- **Cross-Platform**: Automatic platform detection and configuration
 
 ## 📋 Requirements
 
-- **Hardware**: ESP32 development board
+- **Hardware**: Any supported Arduino-compatible board (ESP32, ESP8266, Arduino Uno/Nano/Mega, STM32, SAMD)
 - **Software**: Arduino IDE 1.8+ or PlatformIO
-- **Library**: This radar library
-- **Connections**: UART communication (TX/RX pins)
+- **Library**: This radar library with automatic platform detection
+- **Connections**: UART communication (hardware or software serial)
 
 ## 🎯 Use Cases
 
@@ -78,9 +81,10 @@ The Ai-Thinker RD-03D is a 24GHz Frequency Modulated Continuous Wave (FMCW) rada
 ## 📖 Getting Started
 
 1. **Install the Library**: See [Installation Guide](installation.md)
-2. **Connect Hardware**: Follow [Hardware Setup](hardware-setup.md)
-3. **Run Examples**: Try the [Basic Examples](examples/basic-examples.md)
-4. **Configure Tracking**: Learn about [Target Tracking](tracking-algorithm.md)
+2. **Check Platform Support**: Review [Platform Support](platform-support.md) for your board
+3. **Connect Hardware**: Follow [Hardware Setup](hardware-setup.md) for your specific platform
+4. **Run Examples**: Try the [Basic Examples](examples/basic-examples.md)
+5. **Configure Tracking**: Learn about [Target Tracking](tracking-algorithm.md)
 
 ## 🤝 Contributing
 
