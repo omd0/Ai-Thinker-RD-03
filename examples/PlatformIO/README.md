@@ -1,155 +1,150 @@
-# RD-03 PlatformIO Example
+# RD-03D Radar Sensor - PlatformIO Example
 
-This is a PlatformIO example for the Ai-Thinker RD-03 24Ghz FMCW radar sensor.
+This example demonstrates how to use the Ai-Thinker RD-03D radar sensor with PlatformIO and ESP32.
 
 ## Features
 
-- **Operating Mode**: Basic target detection with range information
-- **Reporting Mode**: Energy data from different distance gates
-- **Debugging Mode**: Doppler data visualization
-- **Automatic Mode Switching**: Cycles through all three modes every 10 seconds
-- **LED Feedback**: Built-in LED indicates target presence
+- **Multi-target detection**: Track up to 8 targets simultaneously
+- **Real-time data processing**: Continuous target monitoring
+- **Configurable parameters**: Adjustable detection range and sensitivity
+- **Multiple output formats**: Support for binary and ASCII data
 
 ## Hardware Requirements
 
-- ESP32 board (ESP32-S3, ESP32-C3, or standard ESP32)
-- Ai-Thinker RD-03 radar module
-- Jumper wires
+- ESP32 development board
+- RD-03D radar module
+- Serial connection (UART)
 
-## Connections
+## Pin Connections
 
-| RD-03 Module | ESP32 Pin |
-|--------------|-----------|
-| VCC          | 3.3V      |
-| GND          | GND       |
-| RX           | GPIO 17   |
-| TX           | GPIO 16   |
+| RD-03D Pin | ESP32 Pin | Description |
+|------------|-----------|-------------|
+| 5V         | 5V        | Power supply |
+| GND        | GND       | Ground       |
+| TX         | GPIO 26   | Radar TX → ESP32 RX |
+| RX         | GPIO 27   | Radar RX ← ESP32 TX |
 
-## Pin Configuration
+## Configuration
 
-The example uses the following pins:
-- **RADAR_RX_PIN**: GPIO 16 (connected to RD-03 TX)
-- **RADAR_TX_PIN**: GPIO 17 (connected to RD-03 RX)
-- **BUILTIN_LED_PIN**: GPIO 2 (built-in LED)
+The example is configured for:
+- **Baud rate**: 256000 (RD-03D specific)
+- **Detection range**: 20cm to 800cm
+- **Sensitivity**: 128 (medium)
+- **Mode**: Multi-target detection
+- **Output format**: Binary
 
-## Installation
+## Building and Uploading
 
-1. Clone or download this example
-2. Open the project in PlatformIO
-3. Select your target board from the available environments:
-   - `esp32-s3-devkitm-1` for ESP32-S3
-   - `esp32dev` for standard ESP32
-   - `esp32-c3-devkitm-1` for ESP32-C3
-4. Build and upload the project
+1. **Install PlatformIO**: Make sure you have PlatformIO installed
+2. **Clone the repository**: Include the RD-03D library
+3. **Build the project**:
+   ```bash
+   pio run
+   ```
+4. **Upload to ESP32**:
+   ```bash
+   pio run --target upload
+   ```
+5. **Monitor serial output**:
+   ```bash
+   pio device monitor
+   ```
 
-## Usage
+## Expected Output
 
-### Serial Monitor Output
+The example will output:
+- Radar initialization status
+- Configuration parameters
+- Real-time target detection data
+- Periodic status reports
 
-The example provides detailed output through the serial monitor:
-
+Example output:
 ```
-RD-03 PlatformIO Example Starting...
-Radar initialized successfully
+RD-03D Radar Sensor - PlatformIO Example
+=========================================
+Radar sensor initialized successfully
+Configuring radar parameters...
+Firmware Version: RD-03D v1.0
+Serial Number: 12345678
+Detection range set: 20-800 cm
+Sensitivity set to 128
+Output format set to binary
+Set to multi-target mode
+Exited configuration mode
+Setup complete. Starting detection...
 
-=== RD-03 Radar Sensor Information ===
-Firmware: v1.0.0
-Protocol Version: 1, Buffer Size: 256
-
-Setting mode to OPERATING_MODE... SUCCESS
-Current Mode: OPERATING_MODE
-
-=== Starting Main Loop ===
-Target: Human, Range: 150 cm - LED ON
-Target: None, Range: -1 - LED OFF
+Multi-target detected: 2 targets
+  Target 0 - ID: 1, Distance: 150 cm, Angle: 45°, Velocity: 25 cm/s, Energy: 128
+  Target 1 - ID: 2, Distance: 300 cm, Angle: -30°, Velocity: -15 cm/s, Energy: 95
 ```
-
-### Operating Modes
-
-1. **Operating Mode** (Default):
-   - Detects targets and provides range information
-   - Controls LED based on target presence
-   - Output: `Target: Human, Range: 150 cm - LED ON`
-
-2. **Reporting Mode**:
-   - Provides energy data from different distance gates
-   - Useful for analyzing radar sensitivity
-   - Output: `Target: 1, Distance: 150 cm, E0:1234, E1:5678, ...`
-
-3. **Debugging Mode**:
-   - Visual representation of doppler data
-   - Shows movement patterns in real-time
-   - Output: ASCII visualization of radar data
-
-### Mode Switching
-
-The example automatically cycles through all three modes every 10 seconds for demonstration purposes. In a real application, you would typically choose one mode based on your requirements.
 
 ## Customization
 
-### Changing Pins
-
-Modify the pin definitions at the top of `main.cpp`:
-
+### Changing Detection Range
 ```cpp
-#define RADAR_RX_PIN 16  // Change to your desired RX pin
-#define RADAR_TX_PIN 17  // Change to your desired TX pin
-#define BUILTIN_LED_PIN 2 // Change to your desired LED pin
+// Set detection range from 50cm to 600cm
+radar.setDetectionRange(50, 600);
 ```
 
-### Disabling Auto Mode Switching
-
-To use only one mode, comment out the mode switching code in the `loop()` function:
-
+### Adjusting Sensitivity
 ```cpp
-// Comment out this section to disable auto mode switching
-/*
-static unsigned long lastModeChange = 0;
-if (millis() - lastModeChange > 10000) {
-    // ... mode switching code
-}
-*/
+// Set high sensitivity (0-255, higher = more sensitive)
+radar.setSensitivity(200);
 ```
 
-### Adjusting Timing
-
-Modify the delay values to change the update rate:
-
+### Switching Modes
 ```cpp
-delay(100); // Change this value to adjust loop frequency
+// Single target mode
+radar.setSingleTargetMode();
+
+// Multi-target mode
+radar.setMultiTargetMode();
+
+// Debug mode
+radar.setDebugMode();
 ```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **"Failed to initialize radar"**:
-   - Check wiring connections
-   - Verify power supply (3.3V)
-   - Ensure correct pin assignments
+1. **No data received**: 
+   - Check baud rate (must be 256000)
+   - Verify pin connections
+   - Ensure proper power supply
 
-2. **No serial output**:
-   - Check monitor speed (should be 115200)
-   - Verify USB connection
-   - Try different USB cable
+2. **Configuration failures**:
+   - Check if radar is responding to commands
+   - Verify serial connection
+   - Try resetting the radar module
 
-3. **Inconsistent readings**:
-   - Ensure stable power supply
-   - Check for electromagnetic interference
-   - Verify module is properly mounted
+3. **Incorrect readings**:
+   - Calibrate detection range
+   - Adjust sensitivity settings
+   - Check for interference
 
-### Debug Information
+### Debug Output
 
-The example includes comprehensive debug output. Monitor the serial console for:
-- Firmware version information
-- Protocol version and buffer size
-- Mode change confirmations
-- Target detection status
+Enable debug output by modifying `platformio.ini`:
+```ini
+build_flags = 
+    -D_LOG_LEVEL=6  ; Enable debug messages
+```
 
-## Library Information
+## API Reference
 
-This example uses the [Ai-Thinker-RD-03 library](https://github.com/Gjorgjevikj/Ai-Thinker-RD-03) by Dejan Gjorgjevikj.
+The example demonstrates the main RD-03D API functions:
+
+- `begin()` - Initialize radar
+- `setDetectionRange()` - Configure detection range
+- `setSensitivity()` - Set sensitivity level
+- `setMultiTargetMode()` - Enable multi-target detection
+- `read()` - Read incoming data
+- `getTargetCount()` - Get number of targets
+- `getTargetInfo()` - Get target details
+
+For complete API documentation, see the main library README.
 
 ## License
 
-This example is provided as-is for educational purposes. The RD-03 library is licensed under GPL-3.0. 
+This example is part of the RD-03D library and follows the same license terms. 

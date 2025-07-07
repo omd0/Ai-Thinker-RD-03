@@ -3,617 +3,461 @@
 // This library is made for little endian systems only!
 #ifdef TEST_LITTLE_ENDIAN
 
-AiThinker_RD_03::AiThinker_RD_03() : radarUART(nullptr), frameTimeOut(120), interCommandDelay(0), opMode(OPERATING_MODE)
+AiThinker_RD_03D::AiThinker_RD_03D() : radarUART(nullptr), frameTimeout(200), interCommandDelay(100), currentMode(SINGLE_TARGET_MODE), outputFormat(FORMAT_BINARY)
 {
     init();
 }
 
-void AiThinker_RD_03::init()
+void AiThinker_RD_03D::init()
 {
-    inConfigMode = inFrame = frameReady = false;
+    inConfigMode = inFrame = frameAvailable = false;
     receivedFrameLen = currentFrameIndex = 0;
+    lastFrameType = UNIDENTIFIED_FRAME;
+    targetCount = 0;
     bufferLastFrame = receiveBuffer[1];
     bufferCurrentFrame = receiveBuffer[0];
+    
+    // Initialize configuration parameters
+    configParams.minDistance = 20;    // 20cm minimum
+    configParams.maxDistance = 800;   // 800cm maximum
+    configParams.sensitivity = 128;   // Medium sensitivity
+    configParams.outputFormat = FORMAT_BINARY;
 }
 
-bool AiThinker_RD_03::begin(HardwareSerial& rSerial, int rxPin, int txPin, int rxBufferSize)
+bool AiThinker_RD_03D::begin(HardwareSerial& rSerial, int rxPin, int txPin, int rxBufferSize)
 {
     radarUART = &rSerial;
     radarUART->setRxBufferSize(rxBufferSize);
-    radarUART->begin(115200, SERIAL_8N1, rxPin, txPin); //UART for monitoring the radar
+    // RD-03D uses 256000 baud rate according to documentation
+    radarUART->begin(256000, SERIAL_8N1, rxPin, txPin);
     init();
     return true;
 }
 
-//swap reading buffers
-void AiThinker_RD_03::swapBuffers()
+void AiThinker_RD_03D::swapBuffers()
 {
-    //frameReady = true;
     uint8_t* tmp = bufferLastFrame;
     bufferLastFrame = bufferCurrentFrame;
     receivedFrameLen = currentFrameIndex;
     lastFrameStartTS = currentFrameStartTS;
     bufferCurrentFrame = tmp;
     currentFrameIndex = 0;
-    //inFrame = false;
+    frameAvailable = true;
 }
 
-void AiThinker_RD_03::clearRxBuffer()
+void AiThinker_RD_03D::clearRxBuffer()
 {
     unsigned long int t = millis();
     while (radarUART->available() && millis() - t < 1500)
         radarUART->read();
 }
 
-// reads incoming bytes on the serial and stores them in buffer
-int AiThinker_RD_03::read()
+int AiThinker_RD_03D::read()
 {
-    int rc = 0; // number of bytes read in this call
+    int rc = 0;
+    
     if (inConfigMode)
     {
-            if (!inFrame)
+        // Handle configuration mode responses
+        if (!inFrame)
+        {
+            rc += readUntilHeader();
+        }
+        else
+        {
+            while (radarUART->available())
             {
-                rc += readUntilHeader(ACK_FRAME_HEADER);
-            }
-            else // inFrame
-            {
-                while (radarUART->available())
-                {
-                    uint8_t c = radarUART->read();
-                    rc++;
-                    bufferCurrentFrame[currentFrameIndex++] = c;
+                uint8_t c = radarUART->read();
+                rc++;
+                bufferCurrentFrame[currentFrameIndex++] = c;
 
-                    if (currentFrameIndex >= RECEIVE_BUFFER_SIZE)
+                if (currentFrameIndex >= RECEIVE_BUFFER_SIZE)
+                {
+                    R_LOG_ERROR("ERROR: Receive buffer overrun!\n");
+                    inFrame = false;
+                    frameAvailable = false;
+                    currentFrameIndex = 0;
+                }
+                else if (currentFrameIndex >= 6 && bufferCurrentFrame[currentFrameIndex - 1] == FRAME_TRAILER)
+                {
+                    // Check if we have a complete ACK frame
+                    if (validateFrame(bufferCurrentFrame, currentFrameIndex))
                     {
-                        R_LOG_ERROR("ERROR: Receive buffer overrun!\n");
-                        inFrame = false;
-                        frameReady = false;
-                        currentFrameIndex = 0;
-                    }
-                    else if (currentFrameIndex >= 14
-                        && *(reinterpret_cast<const uint32_t*>(bufferCurrentFrame + (reinterpret_cast<const ACKframeCommand*>(bufferCurrentFrame))->ifDataLength + 6)) == ACK_FRAME_TRAILER)
-/*                    else if ((currentFrameIndex >= 14
-                        && (reinterpret_cast<const ACKframeCommand*>(bufferCurrentFrame))->ifDataLength == 4
-                        && *(reinterpret_cast<const uint32_t*>(bufferCurrentFrame + 10)) == ACK_FRAME_TRAILER) // short ack
-                        ||
-                        (currentFrameIndex >= 18 // ack with paraemeter
-                            && (reinterpret_cast<const ACKframeCommand*>(bufferCurrentFrame))->ifDataLength == 8
-                            && *(reinterpret_cast<const uint32_t*>(bufferCurrentFrame + 14)) == ACK_FRAME_TRAILER)
-                        ||
-                        (currentFrameIndex >= 22 // version info frame
-                            && (reinterpret_cast<const ACKframeCommand*>(bufferCurrentFrame))->ifDataLength == 12
-                            && *(reinterpret_cast<const uint32_t*>(bufferCurrentFrame + 18)) == ACK_FRAME_TRAILER)
-                        )*/
-                    {
-                        frameReady = true;
+                        frameAvailable = true;
+                        lastFrameType = ACK_FRAME;
                         swapBuffers();
                         inFrame = false;
                         break;
                     }
                 }
             }
-        //} // end while(available)
+        }
     }
-    else // not in config mode
+    else
     {
-        if (opMode == OPERATING_MODE) // ASCII messages every ~100ms
+        // Handle normal data frames
+        if (!inFrame)
+        {
+            rc += readUntilHeader();
+        }
+        else
         {
             while (radarUART->available())
             {
                 uint8_t c = radarUART->read();
-                if (currentFrameIndex==0)
-                    currentFrameStartTS = millis();
-                bufferCurrentFrame[currentFrameIndex++] = c;
                 rc++;
+                bufferCurrentFrame[currentFrameIndex++] = c;
+
                 if (currentFrameIndex >= RECEIVE_BUFFER_SIZE)
                 {
                     R_LOG_ERROR("ERROR: Receive buffer overrun!\n");
                     inFrame = false;
                     currentFrameIndex = 0;
                 }
-                if (c == '\n')
+                else if (currentFrameIndex >= 6 && bufferCurrentFrame[currentFrameIndex - 1] == FRAME_TRAILER)
                 {
-                    bufferCurrentFrame[currentFrameIndex] = 0;
-                    swapBuffers();
-                }
-            }
-        }
-        else if (opMode == REPORTING_MODE)
-        {
-            if (inFrame)
-            {
-                int ab = radarUART->available();
-                if (ab)
-                {
-                    if (currentFrameIndex + ab > 45) // 45 == reporting frame size
-                        ab = 45 - currentFrameIndex;
-                    radarUART->readBytes(bufferCurrentFrame + currentFrameIndex, ab);
-                    currentFrameIndex += ab;
-                    rc += ab;
-                }
-                // assuming fixed predetermined size of data frames, 
-                // does not check the frame size field, does  check for trailer??
-                if (currentFrameIndex >= 45) // check for proper trailer 
-                {
-                    const uint32_t* trailer = reinterpret_cast<const uint32_t*>(bufferCurrentFrame + 41);
-                    if (*trailer == DAT_FRAME_TRAILER)
+                    // Check if we have a complete data frame
+                    if (validateFrame(bufferCurrentFrame, currentFrameIndex))
                     {
-                        frameReady = true;
+                        // Parse the frame based on type
+                        uint8_t frameType = bufferCurrentFrame[1];
+                        if (frameType == 0x01) // Single target
+                        {
+                            lastFrameType = TARGET_DATA;
+                            const SingleTargetFrame* frame = reinterpret_cast<const SingleTargetFrame*>(bufferCurrentFrame);
+                            targetCount = 1;
+                            targets[0] = frame->target;
+                        }
+                        else if (frameType == 0x02) // Multi-target
+                        {
+                            lastFrameType = MULTI_TARGET_DATA;
+                            const MultiTargetFrame* frame = reinterpret_cast<const MultiTargetFrame*>(bufferCurrentFrame);
+                            targetCount = frame->targetCount;
+                            if (targetCount > 8) targetCount = 8; // Safety limit
+                            for (int i = 0; i < targetCount; i++)
+                            {
+                                targets[i] = frame->targets[i];
+                            }
+                        }
+                        else if (frameType == 0x03) // Debug data
+                        {
+                            lastFrameType = DEBUG_DATA;
+                        }
+                        
+                        frameAvailable = true;
                         swapBuffers();
                         inFrame = false;
+                        break;
                     }
                 }
             }
-            else // not inFrame
-            {
-                rc += readUntilHeader(DAT_FRAME_HEADER);
-            }
         }
-        else if (opMode == DEBUGGING_MODE)
-        {
-            if (inFrame)
-            {
-                int ab = radarUART->available();
-                if (ab)
-                {
-                    if (currentFrameIndex + ab > 1288) // 1288 == debugging frame size
-                        ab = 1288 - currentFrameIndex;
-                    radarUART->readBytes(bufferCurrentFrame + currentFrameIndex, ab);
-                    currentFrameIndex += ab;
-                    rc += ab;
-                }
-                // assuming fixed predetermined size of data frames, 
-                // does not check the frame size field, does  check for trailer??
-                //if (currentFrameIndex >= 1288) // check for proper trailer 
-                //const uint32_t* trailer = reinterpret_cast<const uint32_t*>(bufferCurrentFrame + 1284);
-                const uint32_t* trailer = reinterpret_cast<const uint32_t*>(bufferCurrentFrame + currentFrameIndex -  4);
-                if (*trailer == DBG_FRAME_TRAILER)
-                {
-                    frameReady = true;
-                    swapBuffers();
-                    inFrame = false;
-                }
-            }
-            else // not inFrame
-            {
-                rc += readUntilHeader(DBG_FRAME_HEADER);
-            }
-        }
-    } // not in config mode
+    }
+    
     return rc;
 }
 
-int AiThinker_RD_03::readUntilHeader(FrameField header)
+int AiThinker_RD_03D::readUntilHeader()
 {
     int rc = 0;
     while (radarUART->available())
     {
         uint8_t c = radarUART->read();
         rc++;
-        //if (currentFrameIndex == 0)
-        //    currentFrameStartTS = millis();
+        if (currentFrameIndex == 0)
+            currentFrameStartTS = millis();
         bufferCurrentFrame[currentFrameIndex++] = c;
-        if (currentFrameIndex == 4) // header possibly in buffer
+        
+        if (currentFrameIndex == 1)
         {
-            // check for valid header
-            uint32_t* head = reinterpret_cast<uint32_t*>(bufferCurrentFrame);
-            if (*head == header)
+            if (c == FRAME_HEADER)
             {
                 inFrame = true;
-                frameReady = false;
-                currentFrameStartTS = millis();
                 break;
             }
-            else // not valid header ... skip until header
+            else
             {
-                uint8_t frameHeadByte = static_cast<uint8_t>(header & 0x000000ff);
-                while (currentFrameIndex && *bufferCurrentFrame != frameHeadByte)
-                {
-                    currentFrameIndex--;
-                    (*head) >>= 8;
-                }
+                currentFrameIndex = 0; // Reset if not header
             }
         }
     }
     return rc;
 }
- 
-//int AiThinker_RD_03::read()
-//{
-//    int rc = 0; // number of bytes read in this call
-//    while (radarUART->available())
-//    {
-//        uint8_t c = radarUART->read();
-//        rc++;
-//        if (!inFrame)
-//        {
-//            if (opMode == DEBUGGING_MODE && !inConfigMode)
-//            {
-//                if (c != 0xaa)
-//                    continue;
-//            }
-//            if (c == ACK_FRAME_HEAD_BYTE || c == DAT_FRAME_HEAD_BYTE || c == DBG_FRAME_HEAD_BYTE) // new frame begining (c>>4 == 0x0f)
-//            {
-//                inFrame = true;
-//                frameReady = false;
-//                //swap reading buffers
-//                bufferLastFrame = bufferCurrentFrame;
-//                receivedFrameLen = currentFrameIndex;
-//                lastFrameStartTS = currentFrameStartTS;
-//                bufferCurrentFrame = bufferLastFrame;
-//                currentFrameIndex = 0;
-//                currentFrameStartTS = millis();
-//            }
-//        }
-//        else
-//        {
-//            if (currentFrameIndex > 6) // the frame type and length can be determined 
-//            {
-//                if (frameType(CURRENT_FRAME) == UNIDENTIFIED_FRAME)
-//                {
-//
-//                    inFrame = frameReady = false;
-//                    currentFrameIndex = 0;
-//                    R_LOG_WARN("Sync!\n");
-//                }
-//                else if (frameType(CURRENT_FRAME) == ENGINEERING_DATA)
-//                {
-//                    if (currentFrameIndex >= (reinterpret_cast<const FrameStart*>(bufferCurrentFrame))->ifDataLength + 7)
-//                    {
-//                        frameReady = true; // the rest are trailer bytes, so the frame can be processed 
-//                    }
-//                }
-//                else if (frameType(CURRENT_FRAME) == DEBUGGING_DATA)
-//                {
-//                    if (currentFrameIndex >= sizeof(DebuggingFrame) - sizeof(FrameMarkerType))
-//                    {
-//                        frameReady = true; // the rest are trailer bytes, so the frame can be processed 
-//                    }
-//                }
-//            }
-//            if (currentFrameIndex >= RECEIVE_BUFFER_SIZE)
-//            {
-//                R_LOG_ERROR("ERROR: Receive buffer overrun!\n");
-//                inFrame = false;
-//                currentFrameIndex = 0;
-//            }
-//
-//        }
-//
-//        bufferCurrentFrame[currentFrameIndex++] = c;
-//
-//        if ( (frameType(CURRENT_FRAME) == ENGINEERING_DATA || frameType(CURRENT_FRAME) == ACK_FRAME)
-//            && currentFrameIndex >= (reinterpret_cast<const FrameStart*>(bufferCurrentFrame))->ifDataLength + 10)
-//        {
-//            inFrame = false;
-//        }
-//        if (frameType(CURRENT_FRAME) == DEBUGGING_DATA && currentFrameIndex >= sizeof(DebuggingFrame))
-//        {
-//            inFrame = false;
-//            R_LOG_DEBUG("currentFrameIndex=%d\n", currentFrameIndex);
-//            _dumpCurrentFrame();
-//        }
-//
-//
-//
-//
-//    }
-//    return rc;
-//}
 
-
-void AiThinker_RD_03::write(const uint8_t* data, int size) //send raw data
+bool AiThinker_RD_03D::enterConfigMode()
 {
-    static unsigned long lastCommandIssuedAt = 0UL;
-    DEBUG_DUMP_FRAME(data, size, ">>[","]");
-    if (interCommandDelay > 0)
-    {
-        unsigned long sinceLast = millis() - lastCommandIssuedAt;
-        if(sinceLast < interCommandDelay)
-            delay(interCommandDelay - sinceLast);
-    }
-    radarUART->write(data, size);
-    radarUART->flush();
-}
-
-// check the type of the frame
-// frame=true -> last completed frame, frame=false -> current frame
-AiThinker_RD_03::FrameType AiThinker_RD_03::frameType(bool frame) const
-{
-    if (frame || currentFrameIndex > 6) // the basic type can be determined by the first byte only
-    {
-        const FrameStart* fheadid = reinterpret_cast<const FrameStart*>(frame ? bufferLastFrame : bufferCurrentFrame);
-        switch (fheadid->header.frameWord)
-        {
-        case DAT_FRAME_HEADER:
-            return ENGINEERING_DATA;
-            break;
-        case DBG_FRAME_HEADER:
-            return DEBUGGING_DATA;
-            break;
-        case ACK_FRAME_HEADER:
-            return ACK_FRAME;
-            break;
-        default:
-            return UNKNOWN_FRAME;
-        }
-    }
-    return UNIDENTIFIED_FRAME; // not yet identified
-}
-
-bool AiThinker_RD_03::readAckFrame()
-{
-    unsigned long now = millis();
+    if (inConfigMode) return true;
     
-    frameReady = false;
-    // wait for something to arrive / frame to start
-    while (!read() && millis() - now < frameTimeOut)
-        delay(1);
-    if (millis() - now >= frameTimeOut)
+    clearRxBuffer();
+    bool success = sendCommand(ENTER_CONFIG_MODE);
+    if (success)
     {
-        R_LOG_WARN("# TimeOut while waiting for reply - no response\n");
-        return false;
+        inConfigMode = true;
+        R_LOG_INFO("Entered configuration mode\n");
     }
-    
-    // waiting for ACK frame
-    now = millis();
-    while (!frameReady && millis() - now < frameTimeOut)
-    {
-        if (!read())
-            delay(1);
-    }
-    // either timeout or ACK has arrived and is in bufferLastFrame now
-    if (millis() - now >= frameTimeOut)
-    {
-        DEBUG_DUMP_FRAME(bufferCurrentFrame, currentFrameIndex, "##[", "]");
-        R_LOG_WARN("# TimeOut while waiting for ACK frame\n");
-        return false;
-    }
-    else
-        DEBUG_DUMP_FRAME(bufferLastFrame, receivedFrameLen, "++[", "]");
-
-    if (frameType(LAST_FRAME) != ACK_FRAME)
-    {
-        R_LOG_WARN("# NOT an ACK frame!\n");
-        return false;
-    }
-    return true;
-}
-
-
-//bool AiThinker_RD_03::readAckFrame() 
-//{
-//    unsigned long now = millis();
-//
-//    // wait for something to arrive / frame to start
-//    while (!read() && millis() - now < frameTimeOut)
-//        delay(1);
-//        //yield();
-//    if (millis() - now >= frameTimeOut)
-//    {
-//        R_LOG_WARN("# TimeOut while waiting for reply - no response\n");
-//        return false;
-//    }
-//
-//    // waiting for ACK frame, skip the other (if any) frames that were in the buffer
-//    now = millis();
-//    while (frameType(CURRENT_FRAME) != ACK_FRAME && millis() - now < frameTimeOut)
-//    {
-//        //while (!frameReady && millis() - now < frameTimeOut)
-//        {
-//            if (!read())
-//                delayMicroseconds(50);
-//        }
-//    }
-//    if (millis() - now >= frameTimeOut)
-//    {
-//        DEBUG_DUMP_FRAME(bufferCurrentFrame, currentFrameIndex, "##[", "]");
-//        R_LOG_WARN("# TimeOut while waiting for ACK frame\n");
-//        //yield();
-//        return false;
-//    }
-//    if (frameType(CURRENT_FRAME) == ACK_FRAME)
-//    {
-//        int expLen = (reinterpret_cast<const FrameStart*>(bufferCurrentFrame))->ifDataLength + 10;
-//        now = millis();
-//        while (currentFrameIndex < expLen && millis() - now < frameTimeOut)
-//        {
-//            if (!read())
-//                delayMicroseconds(50);
-//        }
-//        DEBUG_DUMP_FRAME(bufferCurrentFrame, currentFrameIndex, "==[", "]");
-//        if (millis() - now >= frameTimeOut)
-//        {
-//            R_LOG_ERROR("# TimeOut reading ACK frame\n");
-//            //yield();
-//            return false;
-//        }
-//    }
-//    else
-//    {
-//        R_LOG_ERROR("# TimeOut while waiting for ACK frame\n");
-//        return false;
-//    }
-//    return true;
-//}
-
-
-bool AiThinker_RD_03::enableConfigMode() 
-{
-    // when entering config mode (from reporting mode) several reporting frames meight be already in the buffer
-    // a longer timeout is needed to ignore them
-    // or ... another apprach would be to clean up the incoming buffer of butes waiting to be read before issuing the command.
-    const static REQframeCommandWithValue cmdEnableConfMode = { CMD_FRAME_HEADER, 0x0004, OPEN_COMMAND_MODE, 0x0001, CMD_FRAME_TRAILER };
-    int retry = 2;
-    while (!inConfigMode && retry--)
-    {
-        unsigned long t = millis();
-        while (radarUART->available() && millis() - t < frameTimeOut)
-            radarUART->read();
-        write(reinterpret_cast<const uint8_t*>(&cmdEnableConfMode), sizeof(REQframeCommandWithValue));
-        inConfigMode = true; // for readAckFrame() to expect command replay ACK
-        bool ack = readAckFrame();
-        inConfigMode = commandAccknowledged(OPEN_COMMAND_MODE, ack, true);
-    }
-    return inConfigMode;
-}
-
-bool AiThinker_RD_03::disableConfigMode() 
-{
-    const static REQframeCommand cmdEndConfMode = { CMD_FRAME_HEADER, 0x0002, CLOSE_COMMAND_MODE, CMD_FRAME_TRAILER };
-    write(reinterpret_cast<const uint8_t *>(&cmdEndConfMode), sizeof(REQframeCommand));
-    //readAckFrame();
-    inConfigMode = !commandAccknowledged(CLOSE_COMMAND_MODE, readAckFrame(), true);
-    return !inConfigMode;
-}
-
-uint16_t AiThinker_RD_03::getProtocolVersion(uint16_t& bufSize)
-{
-    bool wasInConfigMode = inConfigMode;
-    uint16_t ver = 0;
-    enableConfigMode();
-    const static REQframeCommandWithValue cmdEnableConfMode = { CMD_FRAME_HEADER, 0x0004, OPEN_COMMAND_MODE, 0x0001, CMD_FRAME_TRAILER };
-    write(reinterpret_cast<const uint8_t*>(&cmdEnableConfMode), sizeof(REQframeCommandWithValue));
-    if (readAckFrame())
-    {
-        const ACKframeCommandModeEnter* frame = reinterpret_cast<const ACKframeCommandModeEnter *>(bufferLastFrame);
-        ver = frame->protocolVer;
-        bufSize = frame->bufferSize;
-    }
-    if(!wasInConfigMode)
-        disableConfigMode();
-    return ver;
-}
-
-
-const char * AiThinker_RD_03::getFirmwareVersion()
-{
-    const uint16_t FW_STR_SIZE = 15;
-    static char fwVerStr[FW_STR_SIZE+1] = "?"; // null terminated
-    //static FirmwareVersion ver = { 2, "v?"};
-    bool wasInConfigMode = inConfigMode;
-    if (!inConfigMode)
-        enableConfigMode();
-    const static REQframeCommand cmd = { CMD_FRAME_HEADER, 0x0002, READ_FIRMWARE_VERSION, CMD_FRAME_TRAILER };
-    write(reinterpret_cast<const uint8_t*>(&cmd), sizeof(REQframeCommand));
-    bool ackValid = readAckFrame();
-    const ACKframeFirmwareVersion* ack = reinterpret_cast<const ACKframeFirmwareVersion*>(bufferLastFrame);
-    //ver = ack->version;
-    int nc = min((ack->version).len, FW_STR_SIZE);
-    strncpy(fwVerStr, (ack->version).verStr, nc);
-    fwVerStr[nc] = 0;
-    return commandAccknowledged(READ_FIRMWARE_VERSION, ackValid, wasInConfigMode) ? fwVerStr : "?";
-}
-
-uint16_t AiThinker_RD_03::getModuleId(uint32_t &ser)
-{
-    bool wasInConfigMode = inConfigMode;
-    if (!inConfigMode)
-        enableConfigMode();
-    const static REQframeCommand cmd = { CMD_FRAME_HEADER, 0x0002, READ_SERIAL_NUMBER, CMD_FRAME_TRAILER };
-    write(reinterpret_cast<const uint8_t*>(&cmd), sizeof(REQframeCommand));
-    bool ackValid = readAckFrame();
-    const ACKframeSerialNum* ack = reinterpret_cast<const ACKframeSerialNum*>(bufferLastFrame);
-    uint16_t id = ack->moduleID;
-    ser = ack->serial;
-    return commandAccknowledged(READ_FIRMWARE_VERSION, ackValid, wasInConfigMode) ? id : 0;
-}
-
-bool AiThinker_RD_03::setSystemMode(RadarMode sysMode)
-{
-    bool wasInConfigMode = inConfigMode;
-    if (!inConfigMode)
-        enableConfigMode();
-    REQframeSetSystemMode cmd = { CMD_FRAME_HEADER, 0x0008, SET_MODE, 0x0000, sysMode, CMD_FRAME_TRAILER };
-    write(reinterpret_cast<const uint8_t*>(&cmd), sizeof(REQframeSetSystemMode));
-    //readAckFrame();
-    bool success = commandAccknowledged(SET_MODE, readAckFrame(), wasInConfigMode);
-    if(success)
-        opMode = sysMode;
     return success;
 }
 
-int32_t AiThinker_RD_03::reqParameter(uint16_t par, uint16_t readCmd) // cmd == READ_PARAMETER
+bool AiThinker_RD_03D::exitConfigMode()
 {
-    bool wasInConfigMode = inConfigMode;
-    if (!inConfigMode)
-        enableConfigMode();
-    REQframeCommandWithValue cmd = { CMD_FRAME_HEADER, 0x0004, readCmd, par, CMD_FRAME_TRAILER };
-    write(reinterpret_cast<const uint8_t*>(&cmd), sizeof(REQframeCommandWithValue));
-    bool ackValid = readAckFrame();
-    const ACKframeParameter* ack = reinterpret_cast<const ACKframeParameter*>(bufferLastFrame);
-    int32_t dist = ack->parValue;
-    return commandAccknowledged(static_cast<RadarCommand>(readCmd), ackValid, wasInConfigMode) ? dist : -1L;
-}
-
-AiThinker_RD_03::FactoryData AiThinker_RD_03::enterFactoryTestMode()
-{
-    bool wasInConfigMode = inConfigMode;
-    if (!inConfigMode)
-        enableConfigMode();
-    const static REQframeCommand cmd = { CMD_FRAME_HEADER, 0x0002, ENTER_FACTORY_TEST_MODE, CMD_FRAME_TRAILER };
-    write(reinterpret_cast<const uint8_t*>(&cmd), sizeof(REQframeCommand));
-    bool ackValid = readAckFrame();
-    const AckFactoryTest* ack = reinterpret_cast<const AckFactoryTest*>(bufferLastFrame);
-    FactoryData fd = ack->factoryData;
-    return commandAccknowledged(READ_FIRMWARE_VERSION, ackValid, wasInConfigMode) ? fd : ((struct FactoryData) { 0, 0, 0, 0, 0, 0, 0 });
-}
-
-bool AiThinker_RD_03::sendCommand(RadarCommand cmd)
-{
-    bool wasInConfigMode = inConfigMode;
-    if (!inConfigMode)
-        enableConfigMode();
-    REQframeCommand cmdFrame = { CMD_FRAME_HEADER, 0x0002, cmd, CMD_FRAME_TRAILER };
-    write(reinterpret_cast<const uint8_t*>(&cmdFrame), sizeof(REQframeCommand));
-    //bool ackValid = readAckFrame();
-    return commandAccknowledged(cmd, readAckFrame(), wasInConfigMode);
-}
-
-bool AiThinker_RD_03::sendCommand(RadarCommand cmd, uint16_t value)
-{
-    bool wasInConfigMode = inConfigMode;
-    if (!inConfigMode)
-        enableConfigMode();
-    REQframeCommandWithValue cmdFrame = { CMD_FRAME_HEADER, 0x0004, cmd, value, CMD_FRAME_TRAILER };
-    write(reinterpret_cast<const uint8_t*>(&cmdFrame), sizeof(REQframeCommandWithValue));
-    //readAckFrame();
-    return commandAccknowledged(cmd, readAckFrame(), wasInConfigMode);
-}
-
-bool AiThinker_RD_03::sendCommand(RadarCommand cmd, uint16_t par, uint32_t value)
-{
-    bool wasInConfigMode = inConfigMode;
-    if (!inConfigMode)
-        enableConfigMode();
-    REQframeCommandValueWithPar cmdFrame = { CMD_FRAME_HEADER, 0x0008, cmd, par, value, CMD_FRAME_TRAILER };
-    write(reinterpret_cast<const uint8_t*>(&cmdFrame), sizeof(REQframeCommandValueWithPar));
-    //readAckFrame();
-    return commandAccknowledged(cmd, readAckFrame(), wasInConfigMode);
-}
-
-bool AiThinker_RD_03::commandAccknowledged(RadarCommand cmd, bool AckFrameReceived, bool remainInConfig)
-{
-    const ACKframeCommand* ack = reinterpret_cast<const ACKframeCommand*>(bufferLastFrame);
-    DEBUG_DUMP_FRAME(bufferLastFrame, ack->ifDataLength + 10, "<<[", "]");
-    bool validAck = (AckFrameReceived
-        && ack->header.frameWord == ACK_FRAME_HEADER)
-        && (ack->commandReply == (cmd | 0x0100))
-        && (ack->ackStatus == 0);
-    if (!remainInConfig)
+    if (!inConfigMode) return true;
+    
+    bool success = sendCommand(EXIT_CONFIG_MODE);
+    if (success)
     {
-        //delay(100);
-        disableConfigMode();
+        inConfigMode = false;
+        R_LOG_INFO("Exited configuration mode\n");
     }
-    return validAck;
+    return success;
 }
 
-void AiThinker_RD_03::_dumpFrame(const uint8_t* buff, int len, String pre, String post, Stream& dumpStream)
+bool AiThinker_RD_03D::setSingleTargetMode()
+{
+    if (!inConfigMode && !enterConfigMode()) return false;
+    
+    bool success = sendCommand(SET_SINGLE_TARGET_MODE);
+    if (success)
+    {
+        currentMode = SINGLE_TARGET_MODE;
+        R_LOG_INFO("Set to single target mode\n");
+    }
+    return success;
+}
+
+bool AiThinker_RD_03D::setMultiTargetMode()
+{
+    if (!inConfigMode && !enterConfigMode()) return false;
+    
+    bool success = sendCommand(SET_MULTI_TARGET_MODE);
+    if (success)
+    {
+        currentMode = MULTI_TARGET_MODE;
+        R_LOG_INFO("Set to multi-target mode\n");
+    }
+    return success;
+}
+
+bool AiThinker_RD_03D::setDebugMode()
+{
+    if (!inConfigMode && !enterConfigMode()) return false;
+    
+    currentMode = DEBUG_MODE;
+    R_LOG_INFO("Set to debug mode\n");
+    return true;
+}
+
+bool AiThinker_RD_03D::setDetectionRange(uint16_t minDist, uint16_t maxDist)
+{
+    if (!inConfigMode && !enterConfigMode()) return false;
+    
+    uint8_t data[4];
+    data[0] = (minDist >> 8) & 0xFF;
+    data[1] = minDist & 0xFF;
+    data[2] = (maxDist >> 8) & 0xFF;
+    data[3] = maxDist & 0xFF;
+    
+    bool success = sendCommand(SET_DETECTION_RANGE, data, 4);
+    if (success)
+    {
+        configParams.minDistance = minDist;
+        configParams.maxDistance = maxDist;
+        R_LOG_INFO("Set detection range: %d-%d cm\n", minDist, maxDist);
+    }
+    return success;
+}
+
+bool AiThinker_RD_03D::getDetectionRange(uint16_t& minDist, uint16_t& maxDist)
+{
+    if (!inConfigMode && !enterConfigMode()) return false;
+    
+    // This would need to be implemented based on actual RD-03D protocol
+    // For now, return stored values
+    minDist = configParams.minDistance;
+    maxDist = configParams.maxDistance;
+    return true;
+}
+
+bool AiThinker_RD_03D::setSensitivity(uint8_t sensitivity)
+{
+    if (!inConfigMode && !enterConfigMode()) return false;
+    
+    bool success = sendCommand(SET_SENSITIVITY, &sensitivity, 1);
+    if (success)
+    {
+        configParams.sensitivity = sensitivity;
+        R_LOG_INFO("Set sensitivity: %d\n", sensitivity);
+    }
+    return success;
+}
+
+uint8_t AiThinker_RD_03D::getSensitivity()
+{
+    return configParams.sensitivity;
+}
+
+bool AiThinker_RD_03D::setOutputFormat(OutputFormat format)
+{
+    if (!inConfigMode && !enterConfigMode()) return false;
+    
+    uint8_t formatByte = static_cast<uint8_t>(format);
+    bool success = sendCommand(SET_OUTPUT_FORMAT, &formatByte, 1);
+    if (success)
+    {
+        outputFormat = format;
+        R_LOG_INFO("Set output format: %d\n", format);
+    }
+    return success;
+}
+
+AiThinker_RD_03D::OutputFormat AiThinker_RD_03D::getOutputFormat()
+{
+    return outputFormat;
+}
+
+const char* AiThinker_RD_03D::getFirmwareVersion()
+{
+    if (!inConfigMode && !enterConfigMode()) return "Unknown";
+    
+    // This would need to be implemented based on actual RD-03D protocol
+    return "RD-03D v1.0";
+}
+
+uint32_t AiThinker_RD_03D::getSerialNumber()
+{
+    if (!inConfigMode && !enterConfigMode()) return 0;
+    
+    // This would need to be implemented based on actual RD-03D protocol
+    return serialNumber;
+}
+
+uint8_t AiThinker_RD_03D::getTargetCount() const
+{
+    return targetCount;
+}
+
+bool AiThinker_RD_03D::getTargetInfo(uint8_t index, TargetInfo& target) const
+{
+    if (index >= targetCount) return false;
+    target = targets[index];
+    return true;
+}
+
+uint16_t AiThinker_RD_03D::getTargetDistance(uint8_t index) const
+{
+    if (index >= targetCount) return 0;
+    return targets[index].distance;
+}
+
+int16_t AiThinker_RD_03D::getTargetAngle(uint8_t index) const
+{
+    if (index >= targetCount) return 0;
+    return targets[index].angle;
+}
+
+int16_t AiThinker_RD_03D::getTargetVelocity(uint8_t index) const
+{
+    if (index >= targetCount) return 0;
+    return targets[index].velocity;
+}
+
+uint8_t AiThinker_RD_03D::getTargetEnergy(uint8_t index) const
+{
+    if (index >= targetCount) return 0;
+    return targets[index].energy;
+}
+
+bool AiThinker_RD_03D::sendCommand(RadarCommand command, const uint8_t* data, uint8_t dataLen)
+{
+    if (!radarUART) return false;
+    
+    CommandFrame frame;
+    frame.header = FRAME_HEADER;
+    frame.command = static_cast<uint8_t>(command);
+    frame.dataLength = dataLen;
+    
+    if (data && dataLen > 0)
+    {
+        if (dataLen > 16) dataLen = 16; // Safety limit
+        memcpy(frame.data, data, dataLen);
+    }
+    
+    // Calculate checksum
+    uint8_t checksum = calculateChecksum(reinterpret_cast<uint8_t*>(&frame) + 1, 2 + dataLen);
+    frame.checksum = checksum;
+    frame.trailer = FRAME_TRAILER;
+    
+    // Send the command
+    radarUART->write(reinterpret_cast<uint8_t*>(&frame), 4 + dataLen);
+    
+    // Wait for acknowledgment
+    if (command != EXIT_CONFIG_MODE)
+    {
+        return readAckFrame();
+    }
+    
+    return true;
+}
+
+bool AiThinker_RD_03D::readAckFrame()
+{
+    unsigned long startTime = millis();
+    frameAvailable = false;
+    
+    while (millis() - startTime < frameTimeout)
+    {
+        if (read() > 0 && frameAvailable && lastFrameType == ACK_FRAME)
+        {
+            const AckFrame* ack = reinterpret_cast<const AckFrame*>(bufferLastFrame);
+            return (ack->status == 0); // 0 = OK, 1 = Error
+        }
+        delay(1);
+    }
+    
+    R_LOG_ERROR("ACK frame timeout\n");
+    return false;
+}
+
+uint8_t AiThinker_RD_03D::calculateChecksum(const uint8_t* data, uint8_t length)
+{
+    uint8_t checksum = 0;
+    for (uint8_t i = 0; i < length; i++)
+    {
+        checksum ^= data[i];
+    }
+    return checksum;
+}
+
+bool AiThinker_RD_03D::validateFrame(const uint8_t* frame, uint8_t length)
+{
+    if (length < 6) return false; // Minimum frame size
+    
+    if (frame[0] != FRAME_HEADER || frame[length - 1] != FRAME_TRAILER)
+        return false;
+    
+    // Calculate and verify checksum
+    uint8_t expectedChecksum = calculateChecksum(frame + 1, length - 3);
+    uint8_t actualChecksum = frame[length - 2];
+    
+    return (expectedChecksum == actualChecksum);
+}
+
+void AiThinker_RD_03D::dumpLastFrame(String label, Stream& dumpStream) const
+{
+    dumpFrame(bufferLastFrame, receivedFrameLen, label + "[", "]", dumpStream);
+}
+
+void AiThinker_RD_03D::dumpFrame(const uint8_t* buff, int len, String pre, String post, Stream& dumpStream)
 {
     dumpStream.print(pre);
     for (int i = 0; i < len; i++)
-        dumpStream.printf("%02x", buff[i]);
+    {
+        if (i > 0) dumpStream.print(" ");
+        if (buff[i] < 0x10) dumpStream.print("0");
+        dumpStream.print(buff[i], HEX);
+    }
     dumpStream.println(post);
 }
 
-#endif
+#else
+#error "This library is made for little endian systems only, and it seems it is being compiled for big endian system!"
+#endif // TEST_LITTLE_ENDIAN

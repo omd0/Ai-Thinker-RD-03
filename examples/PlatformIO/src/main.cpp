@@ -8,205 +8,168 @@
 #include <Arduino.h>
 #include <Ai-Thinker-RD-03.h>
 
+// RD-03D Radar sensor instance
+AiThinker_RD_03D radar;
+
 // Pin definitions
-#define RADAR_RX_PIN 16
-#define RADAR_TX_PIN 17
-#define BUILTIN_LED_PIN 2
-
-// Serial definitions
-#define MONITOR_SERIAL Serial
-#define RADAR_SERIAL Serial1
-
-// Radar instance
-AiThinker_RD_03 radar;
+#define RADAR_RX_PIN 26
+#define RADAR_TX_PIN 27
 
 // Timing variables
-unsigned int last_frame_ts = 0;
-unsigned long loopStart;
-
-// Target information
-char target[10] = "?";
-int range = -1;
-
-// Mode control
-AiThinker_RD_03::RadarMode modes[] = { 
-    AiThinker_RD_03::DEBUGGING_MODE, 
-    AiThinker_RD_03::REPORTING_MODE, 
-    AiThinker_RD_03::OPERATING_MODE 
-};
-int currentMode = 2; // Start with OPERATING_MODE
+unsigned long lastFrameTime = 0;
+unsigned long frameCount = 0;
 
 void setup() {
     // Initialize serial communication
-    MONITOR_SERIAL.begin(115200);
-    RADAR_SERIAL.begin(115200, SERIAL_8N1, RADAR_RX_PIN, RADAR_TX_PIN);
+    Serial.begin(115200);
+    Serial.println("RD-03D Radar Sensor - PlatformIO Example");
+    Serial.println("=========================================");
     
-    // Initialize built-in LED
-    pinMode(BUILTIN_LED_PIN, OUTPUT);
-    digitalWrite(BUILTIN_LED_PIN, LOW);
-    
-    MONITOR_SERIAL.println("RD-03 PlatformIO Example Starting...");
-    delay(2000);
-
-    // Initialize radar
-    if (radar.begin(RADAR_SERIAL, RADAR_RX_PIN, RADAR_TX_PIN)) {
-        MONITOR_SERIAL.println("Radar initialized successfully");
-    } else {
-        MONITOR_SERIAL.println("Failed to initialize radar");
-        while(1) {
-            digitalWrite(BUILTIN_LED_PIN, !digitalRead(BUILTIN_LED_PIN));
-            delay(500);
-        }
+    // Initialize radar sensor
+    if (!radar.begin(Serial1, RADAR_RX_PIN, RADAR_TX_PIN)) {
+        Serial.println("Failed to initialize radar sensor!");
+        return;
     }
-
-    // Configure radar settings
-    radar.setFrameTimeOut(200);
+    
+    Serial.println("Radar sensor initialized successfully");
+    
+    // Configure radar parameters
+    Serial.println("Configuring radar parameters...");
+    
+    // Set timeouts
+    radar.setFrameTimeout(500);
     radar.setInterCommandDelay(100);
-
-    // Get firmware information
-    const char* firmwareVersion = radar.getFirmwareVersion();
-    uint16_t bufferSize, protocolVersion = radar.getProtocolVersion(bufferSize);
     
-    MONITOR_SERIAL.println("\n=== RD-03 Radar Sensor Information ===");
-    MONITOR_SERIAL.print("Firmware: ");
-    MONITOR_SERIAL.println(firmwareVersion);
+    // Get sensor information
+    Serial.print("Firmware Version: ");
+    Serial.println(radar.getFirmwareVersion());
     
-    if (protocolVersion) {
-        MONITOR_SERIAL.print("Protocol Version: ");
-        MONITOR_SERIAL.print(protocolVersion);
-        MONITOR_SERIAL.print(", Buffer Size: ");
-        MONITOR_SERIAL.println(bufferSize);
+    Serial.print("Serial Number: ");
+    Serial.println(radar.getSerialNumber());
+    
+    // Configure detection parameters
+    if (radar.setDetectionRange(20, 800)) {
+        Serial.println("Detection range set: 20-800 cm");
     }
-
-    // Set operating mode
-    MONITOR_SERIAL.print("Setting mode to OPERATING_MODE... ");
-    if (radar.setSystemMode(AiThinker_RD_03::OPERATING_MODE)) {
-        MONITOR_SERIAL.println("SUCCESS");
-    } else {
-        MONITOR_SERIAL.println("FAILED");
+    
+    if (radar.setSensitivity(128)) {
+        Serial.println("Sensitivity set to 128");
     }
-    delay(500);
-
-    // Exit config mode if needed
-    if (radar.isInConfigMode()) {
-        MONITOR_SERIAL.println("Exiting config mode...");
-        radar.disableConfigMode();
+    
+    if (radar.setOutputFormat(AiThinker_RD_03D::FORMAT_BINARY)) {
+        Serial.println("Output format set to binary");
     }
-
-    // Display current mode
-    switch (radar.getSystemMode()) {
-        case AiThinker_RD_03::OPERATING_MODE:
-            MONITOR_SERIAL.println("Current Mode: OPERATING_MODE");
-            break;
-        case AiThinker_RD_03::REPORTING_MODE:
-            MONITOR_SERIAL.println("Current Mode: REPORTING_MODE");
-            break;
-        case AiThinker_RD_03::DEBUGGING_MODE:
-            MONITOR_SERIAL.println("Current Mode: DEBUGGING_MODE");
-            break;
-        default:
-            MONITOR_SERIAL.print("Current Mode: UNKNOWN (0x");
-            MONITOR_SERIAL.print(radar.getSystemMode(), HEX);
-            MONITOR_SERIAL.println(")");
-            break;
+    
+    // Set to multi-target mode for demonstration
+    if (radar.setMultiTargetMode()) {
+        Serial.println("Set to multi-target mode");
     }
-
-    MONITOR_SERIAL.println("\n=== Starting Main Loop ===");
-    loopStart = last_frame_ts = millis();
+    
+    // Exit configuration mode
+    if (radar.exitConfigMode()) {
+        Serial.println("Exited configuration mode");
+    }
+    
+    Serial.println("Setup complete. Starting detection...");
+    Serial.println();
 }
 
 void loop() {
     // Read radar data
-    radar.read();
-
-    // Process based on current mode
-    if (radar.getSystemMode() == AiThinker_RD_03::OPERATING_MODE) {
-        // Operating mode - get target information
-        if (last_frame_ts < radar.frameStartMillis(AiThinker_RD_03::LAST_FRAME) &&
-            last_frame_ts < radar.frameStartMillis(AiThinker_RD_03::CURRENT_FRAME)) {
-            
-            last_frame_ts = max(radar.frameStartMillis(AiThinker_RD_03::LAST_FRAME), 
-                               radar.frameStartMillis(AiThinker_RD_03::CURRENT_FRAME));
-
-            // Parse target information
-            if (!sscanf(radar.lastFrame(AiThinker_RD_03::CURRENT_FRAME), "Range%d", &range)) {
-                sscanf(radar.lastFrame(AiThinker_RD_03::CURRENT_FRAME), "%4s", target);
-            }
-            if (!sscanf(radar.lastFrame(AiThinker_RD_03::LAST_FRAME), "Range%d", &range)) {
-                sscanf(radar.lastFrame(AiThinker_RD_03::LAST_FRAME), "%4s", target);
-            }
-
-            // Display target information
-            MONITOR_SERIAL.printf("Target: %s, Range: %d cm", target, range);
-            
-            // Control LED based on target presence
-            if (strcmp(target, "None") != 0 && range > 0) {
-                digitalWrite(BUILTIN_LED_PIN, HIGH);
-                MONITOR_SERIAL.println(" - LED ON");
-            } else {
-                digitalWrite(BUILTIN_LED_PIN, LOW);
-                MONITOR_SERIAL.println(" - LED OFF");
-            }
-        }
-    }
-    else if (radar.getSystemMode() == AiThinker_RD_03::REPORTING_MODE) {
-        // Reporting mode - energy data
-        if (last_frame_ts < radar.frameStartMillis(AiThinker_RD_03::LAST_FRAME)) {
-            last_frame_ts = radar.frameStartMillis(AiThinker_RD_03::LAST_FRAME);
-            
-            MONITOR_SERIAL.printf("Target: %d, Distance: %d cm", 
-                                 radar.target(), radar.targetDistance());
-            
-            // Display energy data for first few distance gates
-            for (int i = 0; i < 8; i++) {
-                MONITOR_SERIAL.printf(", E%d:%d", i, radar.energyAtDistance(i));
-            }
-            MONITOR_SERIAL.println();
-        }
-    }
-    else if (radar.getSystemMode() == AiThinker_RD_03::DEBUGGING_MODE) {
-        // Debugging mode - doppler data visualization
-        if (last_frame_ts < radar.frameStartMillis(AiThinker_RD_03::LAST_FRAME) &&
-            last_frame_ts < radar.frameStartMillis(AiThinker_RD_03::CURRENT_FRAME)) {
-            
-            last_frame_ts = max(radar.frameStartMillis(AiThinker_RD_03::LAST_FRAME), 
-                               radar.frameStartMillis(AiThinker_RD_03::CURRENT_FRAME));
-
-            if (radar.frameLength() == 1288) {
-                MONITOR_SERIAL.println("\n=== Doppler Data Visualization ===");
-                for (int i = 0; i < 10; i++) {  // Show first 10 time slots
-                    for (int j = 0; j < 16; j++) {  // Show all 16 distance gates
-                        if (radar.doppler(i, j) > 100000UL)
-                            MONITOR_SERIAL.print('#');
-                        else if (radar.doppler(i, j) > 10000UL)
-                            MONITOR_SERIAL.print('+');
-                        else if (radar.doppler(i, j) > 1000UL)
-                            MONITOR_SERIAL.print('.');
-                        else
-                            MONITOR_SERIAL.print(' ');
-                    }
-                    MONITOR_SERIAL.println();
-                }
-                MONITOR_SERIAL.println();
-            } else {
-                MONITOR_SERIAL.printf("Debug frame length: %d\n", radar.frameLength());
-            }
-        }
-    }
-
-    // Mode switching every 10 seconds (for demonstration)
-    static unsigned long lastModeChange = 0;
-    if (millis() - lastModeChange > 10000) {
-        currentMode = (currentMode + 1) % 3;
-        MONITOR_SERIAL.printf("\n=== Switching to Mode %d ===\n", currentMode);
+    int bytesRead = radar.read();
+    
+    if (bytesRead > 0 && radar.frameReady()) {
+        frameCount++;
+        lastFrameTime = millis();
         
-        if (radar.setSystemMode(modes[currentMode])) {
-            MONITOR_SERIAL.println("Mode change successful");
-        } else {
-            MONITOR_SERIAL.println("Mode change failed");
+        // Process the received frame
+        switch (radar.getFrameType()) {
+            case AiThinker_RD_03D::TARGET_DATA:
+                processSingleTarget();
+                break;
+                
+            case AiThinker_RD_03D::MULTI_TARGET_DATA:
+                processMultiTarget();
+                break;
+                
+            case AiThinker_RD_03D::DEBUG_DATA:
+                Serial.println("Debug data received");
+                break;
+                
+            case AiThinker_RD_03D::ACK_FRAME:
+                Serial.println("Configuration ACK received");
+                break;
+                
+            default:
+                Serial.println("Unknown frame type");
+                break;
         }
-        lastModeChange = millis();
     }
+    
+    // Print status every 10 seconds
+    static unsigned long lastStatusTime = 0;
+    if (millis() - lastStatusTime > 10000) {
+        printStatus();
+        lastStatusTime = millis();
+    }
+    
+    // Small delay to prevent overwhelming the serial output
+    delay(10);
+}
 
-    delay(100); // Small delay to prevent overwhelming output
+void processSingleTarget() {
+    uint8_t targetCount = radar.getTargetCount();
+    
+    if (targetCount > 0) {
+        AiThinker_RD_03D::TargetInfo target;
+        if (radar.getTargetInfo(0, target)) {
+            Serial.printf("Single Target - ID: %d, Distance: %d cm, Angle: %d°, Velocity: %d cm/s, Energy: %d\n",
+                         target.targetId,
+                         target.distance,
+                         target.angle,
+                         target.velocity,
+                         target.energy);
+        }
+    } else {
+        Serial.println("No target detected");
+    }
+}
+
+void processMultiTarget() {
+    uint8_t targetCount = radar.getTargetCount();
+    
+    if (targetCount > 0) {
+        Serial.printf("Multi-target detected: %d targets\n", targetCount);
+        
+        for (uint8_t i = 0; i < targetCount; i++) {
+            AiThinker_RD_03D::TargetInfo target;
+            if (radar.getTargetInfo(i, target)) {
+                Serial.printf("  Target %d - ID: %d, Distance: %d cm, Angle: %d°, Velocity: %d cm/s, Energy: %d\n",
+                             i,
+                             target.targetId,
+                             target.distance,
+                             target.angle,
+                             target.velocity,
+                             target.energy);
+            }
+        }
+    } else {
+        Serial.println("No targets detected");
+    }
+}
+
+void printStatus() {
+    Serial.printf("=== Status Report ===\n");
+    Serial.printf("Total frames received: %lu\n", frameCount);
+    Serial.printf("Last frame: %lu ms ago\n", millis() - lastFrameTime);
+    Serial.printf("Current mode: %d\n", radar.getCurrentMode());
+    
+    // Print configuration
+    uint16_t minDist, maxDist;
+    if (radar.getDetectionRange(minDist, maxDist)) {
+        Serial.printf("Detection range: %d-%d cm\n", minDist, maxDist);
+    }
+    Serial.printf("Sensitivity: %d\n", radar.getSensitivity());
+    Serial.printf("Output format: %d\n", radar.getOutputFormat());
+    Serial.println("=====================");
 } 

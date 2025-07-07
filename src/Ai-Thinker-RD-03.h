@@ -1,25 +1,29 @@
 /**
-  Ai-Thinker-RD-03 library v 0.7
-  Name: Ai-Thinker-RD-03
-  Purpose: Arduino library for the Ai-Thinker RD-03 24Ghz FMCW radar sensor 
+  Ai-Thinker-RD-03D library v 1.0
+  Name: Ai-Thinker-RD-03D
+  Purpose: Arduino library for the Ai-Thinker RD-03D 24Ghz FMCW radar sensor 
 
-  @author Dejan Gjorgjevikj
-  @version 0.7, 2/2024
+  @author Dejan Gjorgjevikj (original), Refactored for RD-03D
+  @version 1.0, 2024
 
-  This sensor is a Frequency Modulated Continuous Wave radar, ...
+  This sensor is a Frequency Modulated Continuous Wave radar with multi-target detection,
+  capable of tracking targets with distance, angle, and velocity measurements.
  
- ...todo...
+  Based on RD-03D documentation from Ai-Thinker:
+  https://aithinker.blog.csdn.net/article/details/133338984
 
 Known limitations:
-...
+- Requires little-endian systems
+- Limited to ESP32 architecture for now
 
 Resources:
   The code in this library was developed from scratch based on the manufacturer datasheet(s) 
-  ...
+  and refactored for RD-03D specifications.
   
 History of changes:
-    01.02.2024 - v0.1.0 initial ...
-    09.02.2024 - v0.7.0 
+    01.02.2024 - v0.1.0 initial RD-03 version
+    09.02.2024 - v0.7.0 RD-03 version
+    2024 - v1.0.0 Refactored for RD-03D
 
 This library is distributed in the hope that it will be useful, but
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, MERCHANTABILITY or
@@ -33,11 +37,11 @@ https://github.com/Gjorgjevikj/...todo
 
 #pragma once
 
-#ifndef _AI_THINKER_RD_03_H
-#define _AI_THINKER_RD_03_H
+#ifndef _AI_THINKER_RD_03D_H
+#define _AI_THINKER_RD_03D_H
 #include <Arduino.h>
 
-#define AI_THINKER_RD_03_LIB_VERSION 0.7
+#define AI_THINKER_RD_03D_LIB_VERSION 1.0
 
 #ifndef _LOG_LEVEL 
 #define _LOG_LEVEL 2
@@ -79,546 +83,233 @@ https://github.com/Gjorgjevikj/...todo
 #define TEST_LITTLE_ENDIAN (((union { unsigned x; unsigned char c; }){1}).c)
 #ifdef TEST_LITTLE_ENDIAN
 
-// large buffer needen for the radar debuggin mode when it send raw doppler data, not needen for the other modes of operation
-#define RECEIVE_BUFFER_SIZE 2800
+// Buffer size for RD-03D data frames
+#define RECEIVE_BUFFER_SIZE 2048
 
-class AiThinker_RD_03
+class AiThinker_RD_03D
 {
 public:
     enum FrameType : uint8_t 
     { 
         UNIDENTIFIED_FRAME = 0x00,
-        ENGINEERING_DATA = 0x01,
-        BASIC_DATA = 0x02,
-        DEBUGGING_DATA = 0x03,
+        TARGET_DATA = 0x01,
+        MULTI_TARGET_DATA = 0x02,
+        DEBUG_DATA = 0x03,
         UNKNOWN_DATA_FORMAT = 0x0f,
         ACK_FRAME = 0xff,
         UNKNOWN_FRAME = 0xfe
     };
-    enum RadarCommand : uint16_t 
-    {
-        READ_FIRMWARE_VERSION = 0x0000,    // read  the firmware version
-        WRITE_REGISTER = 0x0001,    // ??
-        READ_REGISTER = 0x0002,    // ??
-        CONFIGURE_PARAMETER = 0x0007, // Configure ABD parameters
-        READ_PARAMETER = 0x0008,
-        READ_SERIAL_NUMBER = 0x0011,  // ?? does not work on v1.5.4
-        SET_MODE = 0x0012,
-        READ_SYSTEM_PARAMETER = 0x0013, // ??
-        ENTER_FACTORY_TEST_MODE = 0x0024,
-        EXIT_FACTORY_TEST_MODE = 0x0025,
-        CLOSE_COMMAND_MODE = 0x00FE,      // disable configuration mode
-        OPEN_COMMAND_MODE = 0x00FF       // enable configuration mode
-    };
 
-    enum CommandParameter : uint16_t // parameters for command READ_PARAMETER 
+    enum RadarCommand : uint8_t 
     {
-        MIN_DETECTION_DISTANCE  = 0x0000,   // Minimum detection distance gate 0x0000
-        MAX_DETECTION_DISTANCE  = 0x0001,   // Maximum detection distance gate 0x0001
-        MIN_FRAMES_TO_DETECT    = 0x0002,   // Minimum number of target frames for detected 0x0002
-        MIN_FRAMES_TO_DISSAPEAR = 0x0003,   // Minimum number of frames when the target disappears 0x0003
-        TARGET_DISSAPEAR_DELAY  = 0x0004,   // Target disappearance delay time 0x0004
-        GATE_HIGH_TRESHOLD      = 0x0010,   // 0x0010 - 0x001f high treashold for gate 0-15       
-        GATE_LOW_TRESHOLD       = 0x0020    // 0x0020 - 0x002f low treashold for gate 0-15
+        // RD-03D specific commands
+        SET_SINGLE_TARGET_MODE = 0x01,    // Single target detection mode
+        SET_MULTI_TARGET_MODE = 0x02,     // Multi-target detection mode
+        READ_FIRMWARE_VERSION = 0x03,     // Read firmware version
+        READ_SERIAL_NUMBER = 0x04,        // Read serial number
+        SET_DETECTION_RANGE = 0x05,       // Set detection range
+        READ_DETECTION_RANGE = 0x06,      // Read detection range
+        SET_SENSITIVITY = 0x07,           // Set sensitivity
+        READ_SENSITIVITY = 0x08,          // Read sensitivity
+        SET_OUTPUT_FORMAT = 0x09,         // Set output format
+        READ_OUTPUT_FORMAT = 0x0A,        // Read output format
+        ENTER_CONFIG_MODE = 0xFE,         // Enter configuration mode
+        EXIT_CONFIG_MODE = 0xFF           // Exit configuration mode
     };
 
     enum RadarMode : uint8_t
     {
-        DEBUGGING_MODE = 0x00, // Debugging mode - reporting RDMap
-        REPORTING_MODE = 0x04, // Reporting mode - reports the energy value and detection result of each distance gate
-        OPERATING_MODE = 0x64    // Running mode - prints output status
-//        COMMAND_MODE = 0xff    // Command mode - waits and responds to configuration commands
+        SINGLE_TARGET_MODE = 0x01,        // Single target detection
+        MULTI_TARGET_MODE = 0x02,         // Multi-target detection
+        DEBUG_MODE = 0x03                 // Debug mode with raw data
     };
 
-    enum FrameField : uint32_t
+    enum OutputFormat : uint8_t
     {
-        CMD_FRAME_HEADER  = 0xFAFBFCFD,
-        CMD_FRAME_TRAILER = 0x01020304,
-        ACK_FRAME_HEADER = 0xFAFBFCFD,
-        ACK_FRAME_TRAILER = 0x01020304,
-        DAT_FRAME_HEADER = 0xF1F2F3F4,
-        DAT_FRAME_TRAILER = 0xF5F6F7F8,
-        DBG_FRAME_HEADER = 0x1410BFAA,
-        DBG_FRAME_TRAILER = 0xFAFBFCFD
-    };
-    enum FrameHeadByte : uint8_t
-    {
-        ACK_FRAME_HEAD_BYTE = 0xfd,
-        DAT_FRAME_HEAD_BYTE = 0xf4,
-        DBG_FRAME_HEAD_BYTE = 0xaa
+        FORMAT_ASCII = 0x01,              // ASCII format output
+        FORMAT_BINARY = 0x02              // Binary format output
     };
 
-    enum FrameCL : bool
+    // Frame headers for RD-03D
+    enum FrameHeader : uint8_t
     {
-        CURRENT_FRAME = false,
-        LAST_FRAME = true
+        FRAME_HEADER = 0xAA,              // Frame header byte
+        FRAME_TRAILER = 0x55              // Frame trailer byte
     };
 
 #pragma pack (1)
-    // frame header / trailer 
-    union FrameMarkerType
+    // Target information structure for RD-03D
+    struct TargetInfo
     {
-        uint32_t frameWord;
-        uint8_t frameBytes[4];
-    };
-    // for identifying the frame type and getting the length
-    struct FrameStart
-    {
-        FrameMarkerType header;
-        uint16_t ifDataLength;
-//        uint8_t modeType; // if dataframe - 0x01 Enginnering data, 0x02 Target basic information
-    };
-    struct REQframeCommand
-    {
-        FrameMarkerType header; // FD FC FB FA 0xfafbfcfd
-        uint16_t ifDataLength;
-        uint16_t commandWord;
-        FrameMarkerType trailer; // 04 03 02 01 0x01020304
-    };
-    struct REQframeCommandWithValue
-    {
-        FrameMarkerType header; // FD FC FB FA == 0xfafbfcfd
-        uint16_t ifDataLength; // 04 00 == 0x0004
-        uint16_t commandWord; // FF 00 == 0x00ff
-        uint16_t commandValue; // 01 00 == 0x0001
-        FrameMarkerType trailer; // 04 03 02 01 == 0x01020304
-    };
-    struct REQframeCommandValueWithPar
-    {
-        FrameMarkerType header; // FD FC FB FA == 0xfafbfcfd
-        uint16_t ifDataLength; // 08 00 == 0x0008
-        uint16_t commandWord; // 07 00 == 0x0007
-        uint16_t commandPar; // 0x0000 - 0x0004
-        uint32_t commandValue; //
-        FrameMarkerType trailer; // 04 03 02 01 == 0x01020304
-    };
-    struct ACKframeCommand
-    {
-        FrameMarkerType header; // FD FC FB FA 0xfafbfcfd
-        uint16_t ifDataLength; // 04 00 == 0x0004
-        uint16_t commandReply;
-        uint16_t ackStatus;
-        FrameMarkerType trailer; // 04 03 02 01 0x01020304
-    };
-    struct ACKframeCommandModeEnter
-    {
-        FrameMarkerType header; // FD FC FB FA 0xfafbfcfd
-        uint16_t ifDataLength; // 08 00 == 0x0004
-        uint16_t commandReply; // FF 01 == 0x01ff
-        uint16_t ackStatus;
-        uint16_t protocolVer;
-        uint16_t bufferSize;
-        FrameMarkerType trailer; // 04 03 02 01 0x01020304
+        uint8_t targetId;                 // Target ID (0-255)
+        uint16_t distance;                // Distance in cm
+        int16_t angle;                    // Angle in degrees (-180 to 180)
+        int16_t velocity;                 // Velocity in cm/s
+        uint8_t energy;                   // Signal energy (0-255)
+        uint8_t status;                   // Target status
     };
 
-    struct REQframeSetSystemMode
+    // Single target data frame
+    struct SingleTargetFrame
     {
-        FrameMarkerType header; // FD FC FB FA == 0xfafbfcfd
-        uint16_t ifDataLength; // 08 00 == 0x0008
-        uint16_t commandWord; // 12 00 == 0x0012 - SET_MODE
-        uint16_t parWord; // 00 00 == 0x0000 
-        uint32_t parValue; // 0x00 / 0x04 / 0x64
-        FrameMarkerType trailer; // 04 03 02 01 == 0x01020304
+        uint8_t header;                   // 0xAA
+        uint8_t frameType;                // 0x01 for single target
+        uint8_t dataLength;               // Length of data
+        TargetInfo target;                // Target information
+        uint8_t checksum;                 // Checksum
+        uint8_t trailer;                  // 0x55
     };
 
-    /// <summary>
-/// struct representing the firmware version of the radar sensor (contains the firmware type, major, minor and bugfix parts of the version)
-/// </summary>
-    //struct FirmwareVersion
-    //{
-    //    uint16_t type;    // firmware type
-    //    uint8_t minor;    // minor version of the radar firmware
-    //    uint8_t major;    // major version of the radar firmware
-    //    uint32_t bugfix;  // bug fix version of the radar firmware
-    //};
-    struct FirmwareVersion // 8 bytes
+    // Multi-target data frame
+    struct MultiTargetFrame
     {
-        uint16_t len;    // firmware type
-        char verStr[6]; // version in string format
+        uint8_t header;                   // 0xAA
+        uint8_t frameType;                // 0x02 for multi-target
+        uint8_t dataLength;               // Length of data
+        uint8_t targetCount;              // Number of targets
+        TargetInfo targets[8];            // Up to 8 targets
+        uint8_t checksum;                 // Checksum
+        uint8_t trailer;                  // 0x55
     };
 
-    struct ACKframeFirmwareVersion
+    // Command frame structure
+    struct CommandFrame
     {
-        FrameMarkerType header; // FD FC FB FA 0xfafbfcfd
-        uint16_t ifDataLength;
-        uint16_t commandReply;
-        uint16_t ackStatus;
-        FirmwareVersion version;
-        FrameMarkerType trailer; // 04 03 02 01 0x01020304
+        uint8_t header;                   // 0xAA
+        uint8_t command;                  // Command byte
+        uint8_t dataLength;               // Length of data
+        uint8_t data[16];                 // Command data
+        uint8_t checksum;                 // Checksum
+        uint8_t trailer;                  // 0x55
     };
 
-    struct ACKframeParameter
+    // Acknowledgment frame structure
+    struct AckFrame
     {
-        FrameMarkerType header; // FD FC FB FA 0xfafbfcfd
-        uint16_t ifDataLength; // 08 00 == 0x0008
-        uint16_t commandReply; // FF 01 == 0x01ff
-        uint16_t ackStatus; // 0 / 1
-        uint32_t parValue; 
-        FrameMarkerType trailer; // 04 03 02 01 0x01020304
+        uint8_t header;                   // 0xAA
+        uint8_t ackType;                  // Acknowledgment type
+        uint8_t dataLength;               // Length of data
+        uint8_t status;                   // Status (0=OK, 1=Error)
+        uint8_t data[16];                 // Response data
+        uint8_t checksum;                 // Checksum
+        uint8_t trailer;                  // 0x55
     };
 
-    struct ACKframeSerialNum
+    // Firmware version structure
+    struct FirmwareVersion
     {
-        FrameMarkerType header; // FD FC FB FA 0xfafbfcfd
-        uint16_t ifDataLength; // 08 00 == 0x0008
-        uint16_t commandReply; // FF 01 == 0x01ff
-        uint16_t moduleID; 
-        uint32_t serial;
-        FrameMarkerType trailer; // 04 03 02 01 0x01020304
+        uint8_t major;                    // Major version
+        uint8_t minor;                    // Minor version
+        uint8_t patch;                    // Patch version
+        char buildDate[8];                // Build date (YYYYMMDD)
     };
 
-    struct ReportingFrame // RD-01 uses little-endian format
+    // Configuration parameters
+    struct ConfigParams
     {
-        FrameMarkerType header; // F4 F3 F2 F1 0xf1f2f3f4
-        uint16_t ifDataLength; //0x23
-        uint8_t targetState; // 0 / 1
-        uint16_t targetRange; // 
-        uint16_t rangeEnergy[16]; // Each range gate energy
-        FrameMarkerType trailer; // F8 F7 F6 F5 0xf5f6f7f8
+        uint16_t minDistance;             // Minimum detection distance (cm)
+        uint16_t maxDistance;             // Maximum detection distance (cm)
+        uint8_t sensitivity;              // Sensitivity level (0-255)
+        uint8_t outputFormat;             // Output format
     };
 
-    struct DebuggingFrame
-    {
-        FrameMarkerType header; // AA BF 10 14 0x1410bfaa
-        // 20 * 16 * 4 bytes (20 Doppler, 16 ranges, 4 bytes for each point, data value of 4 bytes per point)
-        uint32_t doppler[20][16]; //doppler[320]; 
-        FrameMarkerType trailer; // FD FC FB FA 0xfafbfcfd
-    };
+#pragma pack()
 
-    struct FactoryData
-    {
-        uint16_t BoardModel;    // Daughter board model: reserved, fill in 0
-        uint16_t CascadeChips;  // Number of chips : 1 - single chip, 2 - double chip, , ,
-        uint16_t Channels;      // Number of channels : number of receiving channels
-        uint16_t DataType;      // Data type : 0 - 1DFFT, 1 - 2DFFT, 2 - 2DFFT PEAK, 3 - DSRAW
-        uint16_t DFFTsize;      //
-        uint16_t ChirpsPerFrame;//
-        uint16_t downsampling;  // Downsampling rate : 1 means no downsampling
-    };
+    // Constructor
+    AiThinker_RD_03D();
 
-    struct AckFactoryTest
-    {
-        FrameMarkerType header; // FD FC FB FA 0xfafbfcfd
-        uint16_t ifDataLength;  // 16 ??
-        uint16_t commandReply;  // 24 01 == 0x0124
-        FactoryData factoryData;
-        FrameMarkerType trailer; // 04 03 02 01 0x01020304
-    };
+    // Initialize the radar module
+    bool begin(HardwareSerial& rSerial, int rxPin, int txPin, int rxBufferSize = 2048);
 
- #pragma pack (0)
-
-public:
-    
-    /// <summary>
-    /// Class representing the radar sensor 
-    /// communicates to the radar through the UART
-    /// </summary>
-    AiThinker_RD_03();
-
-    /// <summary>
-    /// Initialize the radar sensor and associate it to UART 
-    /// </summary>
-    /// <param name="rStream">Stream object representing the UART</param>
-    /// <remarks>Has to be initialized to he appropriate speed before calling begin()</remarks>
-    /// <returns>true on sucess</returns>
-    bool begin(HardwareSerial& rStream, int rxPin, int txPin, int rxBufferSize = 2560);
-
-    /// <summary>
-    /// Sets the timeout for waiting for an accknowledgement frame
-    /// </summary>
-    /// <param name="timeout">Time in ms to wait for a response (ACK fame)</param>
-    void setFrameTimeOut(unsigned long timeout) { frameTimeOut = timeout; }
-
-    /// <summary>
-    /// Returns the timeout for waiting for an accknowledgement frame in milliseconds
-    /// </summary>
-    /// <returns>Time in milliseconds to wait for a response (ACK fame)</returns>
-    unsigned long getFrameTimeOut() const { return frameTimeOut; }
-
-    /// <summary>
-    /// Sets the minimum time between issuing two successive commands to the radar
-    /// </summary>
-    /// <param name="interComDelay">Time in milliseconds between two successive commands</param>
-    /// <remarks>Some radars are slower in procceing issued comands and have small imput buffers (RD-01)</remarks>
-    void setInterCommandDelay(unsigned long interComDelay) { interCommandDelay = interComDelay; }
-
-    /// <summary>
-    /// Returns the minimum time between issuing two successive commands to the radar
-    /// </summary>
-    /// <returns>Time in milliseconds between two successive commands</returns>
-    unsigned long getInterCommandDelay() const { return interCommandDelay; }
-
-    /// <summary>
-    /// Reads the data coming from the radar sensor
-    /// </summary>
-    /// <remarks>Reads the data coming from the radar about the sensed target and stores it in a buffer</remarks>
-    /// <remarks>To be called repeaditly in the loop()</remarks>
-    /// <returns>number of bytes read</returns>
-    int read();
-
-    /// <summary>
-    /// Returns the timestamp (millis) of the current/last frame 
-    /// </summary>
-    /// <remarks>can select current or previous frame</remarks>
-    /// <param name="frame">frame selector: true (default) for the last cmoplitely received frame / false for the current frame</param>
-    /// <returns>timstamp (millis) at which the first byte of the frame has been received</returns>
-    unsigned long frameStartMillis(bool frame = true) const { return frame ? lastFrameStartTS : currentFrameStartTS; } // time start of last frame by default
-
-    /// <summary>
-    /// Returns the type of the current/last frame 
-    /// </summary>
-    /// <remarks>can select current or previous frame</remarks>
-    /// <param name="frame">frame selector: true (default) for the last cmoplitely received frame / false for the current frame</param>
-    /// <returns>FrameType value  
-    /// <list type="bullet">
-    /// <item>UNIDENTIFIED_FRAME, </item>
-    /// <item>ENGINEERING_DATA, </item>
-    /// <item>BASIC_DATA, </item>
-    /// <item>UNKNOWN_DATA_FORMAT, </item>
-    /// <item>ACK_FRAME, </item>
-    /// <item>UNKNOWN_FRAME </item>
-    /// </list>
-    /// </returns>
-    FrameType frameType(bool frame = AiThinker_RD_03::LAST_FRAME) const; // type of the last completely received frame by default
-
-    /// <summary>
-    /// Enter the configuration mode of the radar sesnsor
-    /// </summary>
-    /// <remarks>Sends the command to the sensor to enable configuration mode and waits for reply (ACK frame) from the sensor</remarks>
-    /// <returns>true on sucess</returns>
-    bool enableConfigMode();
-
-    /// <summary>
-    /// Exit the configuration mode of the radar sesnsor
-    /// </summary>
-    /// <remarks>Sends the command to the sensor to end configuration mode</remarks>
-    /// <returns>true on sucess</returns>
-    bool disableConfigMode();
-
+    // Configuration methods
+    bool enterConfigMode();
+    bool exitConfigMode();
     bool isInConfigMode() const { return inConfigMode; }
 
-    /// <summary>
-    /// Returns the system mode of operation
-    /// </summary>
-    /// <remarks>If called while the radar is in command mode will retur the operationg mode when the radar will exit the command mode</remarks>
-    /// <returns>the operating mode of the radar: one of DEBUGGING_MODE / REPORTING_MODE / OPERATING_MODE</returns>
-    RadarMode getSystemMode() const { return opMode; }
+    // Mode control
+    bool setSingleTargetMode();
+    bool setMultiTargetMode();
+    bool setDebugMode();
+    RadarMode getCurrentMode() const { return currentMode; }
 
-    /// <summary>
-    /// Sets the working mode of the radar 
-    /// </summary>
-    /// <param name="sysMode">mode to set: OPERATING_MODE, REPORTING_MODE or DEBUGGING_MODE</param>
-    /// <returns>true on sucess</returns>
-    bool setSystemMode(RadarMode sysMode);
+    // Parameter configuration
+    bool setDetectionRange(uint16_t minDist, uint16_t maxDist);
+    bool getDetectionRange(uint16_t& minDist, uint16_t& maxDist);
+    bool setSensitivity(uint8_t sensitivity);
+    uint8_t getSensitivity();
+    bool setOutputFormat(OutputFormat format);
+    OutputFormat getOutputFormat();
 
-    int32_t reqParameter(uint16_t par, uint16_t cmd = READ_PARAMETER);
+    // Information queries
+    const char* getFirmwareVersion();
+    uint32_t getSerialNumber();
 
-    int32_t getMinDetectionDistance() { return reqParameter(MIN_DETECTION_DISTANCE); }
-    int32_t getMaxDetectionDistance() { return reqParameter(MAX_DETECTION_DISTANCE); }
-    int32_t getMinFramesForDetection() { return reqParameter(MIN_FRAMES_TO_DETECT); }
-    int32_t getMinFramesForDisappear() { return reqParameter(MIN_FRAMES_TO_DISSAPEAR); }
-    int32_t getTargetDisappearDelay() { return reqParameter(TARGET_DISSAPEAR_DELAY); }
+    // Data reading
+    int read();
+    bool frameReady() const { return frameAvailable; }
+    FrameType getFrameType() const { return lastFrameType; }
 
-    int32_t getHighTreashold(int gate) { return reqParameter(GATE_HIGH_TRESHOLD + gate); }
-    int32_t getLowTreashold(int gate) { return reqParameter(GATE_LOW_TRESHOLD + gate); }
+    // Target data access
+    uint8_t getTargetCount() const;
+    bool getTargetInfo(uint8_t index, TargetInfo& target) const;
+    uint16_t getTargetDistance(uint8_t index = 0) const;
+    int16_t getTargetAngle(uint8_t index = 0) const;
+    int16_t getTargetVelocity(uint8_t index = 0) const;
+    uint8_t getTargetEnergy(uint8_t index = 0) const;
 
-    bool setHighTreashold(int gate, uint32_t val) { return sendCommand(CONFIGURE_PARAMETER, GATE_HIGH_TRESHOLD + gate, val); }
-    bool setLowTreashold(int gate, uint32_t val) { return sendCommand(CONFIGURE_PARAMETER, GATE_LOW_TRESHOLD + gate, val); }
-
-    // does not work
-    uint16_t getModuleId(uint32_t &serial);
-    FactoryData enterFactoryTestMode();
-    bool exitFactoryTestMode() { return sendCommand(EXIT_FACTORY_TEST_MODE); }
-    int32_t getSystemParameter(uint16_t par) { return reqParameter(par, READ_SYSTEM_PARAMETER); }
-
-    /// <summary>
-    /// Sets the minimum detection distance of the radar  
-    /// </summary>
-    /// <param name="gate">distance gate 0-15</param>
-    /// <returns>true on sucess</returns>
-    bool setMinDetectionDistance(uint32_t gate) { return sendCommand(CONFIGURE_PARAMETER, MIN_DETECTION_DISTANCE, gate); }
-
-    /// <summary>
-    /// Sets the maximim detection distance of the radar  
-    /// </summary>
-    /// <param name="gate">distance gate 0-15</param>
-    /// <returns>true on sucess</returns>
-    bool setMaxDetectionDistance(uint32_t gate) { return sendCommand(CONFIGURE_PARAMETER, MAX_DETECTION_DISTANCE, gate); }
-
-    /// <summary>
-    /// Sets the minimum number of frames with target for presence detection
-    /// </summary>
-    /// <param name="nFrames">number of frmaes</param>
-    /// <returns>true on sucess</returns>
-    /// <returns>I belive this is the number of consecutive frames with target presence detected in order to register presence</returns>
-    bool setMinFramesForDetection(uint32_t nFrames) { return sendCommand(CONFIGURE_PARAMETER, MIN_FRAMES_TO_DETECT, nFrames); }
-
-    /// <summary>
-    /// Sets the minimum number of frames without target for target disappearance 
-    /// </summary>
-    /// <param name="nFrames">number of frmaes</param>
-    /// <returns>true on sucess</returns>
-    /// <returns>I belive this is the number of consecutive frames without target presence detected in order to register target disappearance</returns>
-    bool setMinFramesForDisappear(uint32_t nFrames) { return sendCommand(CONFIGURE_PARAMETER, MIN_FRAMES_TO_DISSAPEAR, nFrames); }
-
-    /// <summary>
-    /// Sets the target disappearance delay time 
-    /// </summary>
-    /// <param name="delay">delay time</param>
-    /// <returns>true on sucess</returns>
-    bool setTargetDisappearDelay(uint32_t delay) { return sendCommand(CONFIGURE_PARAMETER, TARGET_DISSAPEAR_DELAY, delay); }
-
-    const char * getFirmwareVersion();
-
-    uint16_t getProtocolVersion(uint16_t & bufferSize);
-
-    /// <summary>
-    /// Returns data about the targets
-    /// </summary>
-    /// <remarks>Note: returns the data from the last completely received packet (that can be up to 70ms old)</remarks>
-    /// <returns>target state: encoded as movingTarget(0/1), stationaryTarget(0/1) existance in the 2 LSB</returns>
-    uint8_t target() const { return (reinterpret_cast<const ReportingFrame*>(bufferLastFrame))->targetState; }
-
-    /// <summary>
-    /// Returns the distance to the moving target registered by the radar sensor
-    /// </summary>
-    /// <remarks>Note: returns the data from the last completely received packet (that can be up to 70ms old)</remarks>
-    /// <returns>the distance (in cm)</returns>
-    uint16_t targetDistance() const { return (reinterpret_cast<const ReportingFrame*>(bufferLastFrame))->targetRange; }
-
-    /// <summary>
-    /// Returns the energy of the moving target at given distance
-    /// </summary>
-    /// <param name="n">the number of the gate 0-15 (default ??cm per gate)</param>
-    /// <returns>energy (0-100)</returns>
-    uint16_t energyAtDistance(int n) const { return (reinterpret_cast<const ReportingFrame*>(bufferLastFrame))->rangeEnergy[n]; }
-
-    /// <summary>
-    /// Returns the doppler map bin values 
-    /// </summary>
-    /// <param name="row">row in the map (speed?) </param>
-    /// <param name="col">column in the map (range?) </param>
-    /// <returns>bin value of the coeficient</returns>
-    /// <remarks>Should be called only whil the radar is working in DEBUGGING_MODE</remarks>
-    uint32_t doppler(int i, int j) const { return (reinterpret_cast<const DebuggingFrame*>(bufferLastFrame))->doppler[i][j]; }
-    
-    /// <summary>
-    /// Returns the length in bytes of th last received frame
-    /// </summary>
-    /// <returns>the length in bytes</returns>
-    int frameLength() const { return receivedFrameLen; }
-
-//private:
-// left public for debugging, low level controll of the radar an working with unsupported protocols
-
-    /// <summary>
-    /// Sends raw data to the sensor
-    /// </summary>
-    /// <param name="data">pointer to the data buffer</param>
-    /// <param name="size">number of butes to send</param>
-    void write(const uint8_t* data, int size); //send raw data
-
-    /// <summary>
-    /// Waits for the response from the radar (ACK frame) after issuing a command to the radar
-    /// </summary>
-    /// <remarks>Reads the incoming data of the ACK frame and stores it in the buffer and checks its validity</remarks>
-    /// <returns>true on sucess, false on timeout</returns>
-    bool readAckFrame();
-
-    /// <summary>
-    /// Issues a command to the radar
-    /// </summary>
-    /// <remarks>Sends the given command to the radar sensor waits for the ACK frame and checks its validity</remarks>
-    /// <remarks>If the sensor was already in command mode before calling this function it will remain in command mode</remarks>
-    /// <param name="command">command to be sent (see <see cref="enum RadarCommand">enum RadarCommand</see>)</param>
-    /// <returns>true on sucess</returns>
-    bool sendCommand(RadarCommand command);
-
-    /// <summary>
-    /// Issues a command with parameter to the radar
-    /// </summary>
-    /// <remarks>Sends the given command + parameter to the radar sensor waits for the ACK frame and checks its validity</remarks>
-    /// <remarks>If the sensor was already in command mode before calling this function it will remain in command mode</remarks>
-    /// <param name="command">command to be sent (see <see cref="enum RadarCommand">enum RadarCommand</see>)</param>
-    /// <param name="value">value fo the parameter</param>
-    /// <returns>true on sucess</returns>
-    bool sendCommand(RadarCommand command, uint16_t value);
-
-    /// <summary>
-    /// Issues a command with parameter and value to the radar
-    /// </summary>
-    /// <remarks>Sends the given command + command parameter + value to the radar sensor waits for the ACK frame and checks its validity</remarks>
-    /// <remarks>If the sensor was already in command mode before calling this function it will remain in command mode</remarks>
-    /// <param name="command">command to be sent (see <see cref="enum RadarCommand">enum RadarCommand</see>)</param>
-    /// <param name="par">command parameter to be sent (see <see cref="enum CommandParameter">enum CommandParameter</see>)</param>
-    /// <param name="value">value of the parameter</param>
-    /// <returns>true on sucess</returns>
-    bool sendCommand(RadarCommand cmd, uint16_t par, uint32_t value);
-
-    /// <summary>
-    /// Waits for an accknoledgement for an issued command
-    /// </summary>
-    /// <remarks>Waits for an accknoledgement for an issued command to radar sensor waits for the ACK frame and checks its validity</remarks>
-    /// <param name="command">command to be sent (see <see cref="enum RadarCommand">enum RadarCommand</see>)</param>
-    /// <param name="AckFrameReceived">was an ACK frame succesfully received</param>
-    /// <param name="remainInConfig">wherethere to remain on config mode after ACK has been received</param>
-    /// <returns>true on sucess</returns>
-    bool commandAccknowledged(RadarCommand command, bool AckFrameReceived, bool remainInConfig);
-
-    /// <summary>
-    /// DEBUGGING: Dumps the butes of the last complitely received frame 
-    /// </summary>
-    void _dumpLastFrame(String label = "", Stream& dumpStream = Serial) const {
-        DEBUG_DUMP_FRAME(bufferLastFrame, 
-            inConfigMode ? (reinterpret_cast<const FrameStart*>(bufferLastFrame))->ifDataLength + 10 : 2,
-            label + "[", "]", dumpStream);
-    }
-
-    /// <summary>
-    /// DEBUGGING: Dumps the butes of the last current (ongoing) frame 
-    /// </summary>
-    void _dumpCurrentFrame(String label = "", Stream& dumpStream = Serial) const {
-        DEBUG_DUMP_FRAME(bufferCurrentFrame, currentFrameIndex, label + "[", "]", dumpStream);
-    }
-
-    /// <summary>
-    /// DEBUGGING: Dumps a buffer as a frame 
-    /// </summary>
-    static void _dumpFrame(const uint8_t* buff, int len, String pre = "", String post = "", Stream& dumpStream = Serial);
-
-    /// <summary>
-    /// Returns a pointer to the frmae buffer in memory (of the current or last frame)
-    /// </summary>
-    /// <remarks>current frame still holds the frame received before the last one, until the current frame begins to overwrite it</remarks>
-    /// <param name="frame">frame selector: true (default) for the last complitely received frame / false for the current frame</param>
-    /// <returns>pointer to the memory buffer where the frame is stored</returns>
-    const char* lastFrame(bool frame = true) const { return reinterpret_cast<const char *>(frame ? bufferLastFrame : bufferCurrentFrame); }
-
+    // Utility methods
+    void setFrameTimeout(unsigned long timeout) { frameTimeout = timeout; }
+    unsigned long getFrameTimeout() const { return frameTimeout; }
+    void setInterCommandDelay(unsigned long delay) { interCommandDelay = delay; }
+    unsigned long getInterCommandDelay() const { return interCommandDelay; }
     void clearRxBuffer();
+    const char* getLastFrame() const { return reinterpret_cast<const char*>(bufferLastFrame); }
+    int getFrameLength() const { return receivedFrameLen; }
+
+    // Debug methods
+    void dumpLastFrame(String label = "", Stream& dumpStream = Serial) const;
+    static void dumpFrame(const uint8_t* buff, int len, String pre = "", String post = "", Stream& dumpStream = Serial);
 
 private:
+    // Internal methods
     void init();
-    int readUntilHeader(FrameField header);
+    bool sendCommand(RadarCommand command, const uint8_t* data = nullptr, uint8_t dataLen = 0);
+    bool readAckFrame();
+    uint8_t calculateChecksum(const uint8_t* data, uint8_t length);
+    bool validateFrame(const uint8_t* frame, uint8_t length);
+    int readUntilHeader();
     void swapBuffers();
 
+    // Member variables
     HardwareSerial* radarUART;
     uint8_t receiveBuffer[2][RECEIVE_BUFFER_SIZE];
-    uint8_t* bufferLastFrame; // pointer to the buffer where the last finished frame is stored
-    uint8_t* bufferCurrentFrame; // pointer to the buffer where the next (or currently beeing recived) frame is to be stored
-    unsigned long currentFrameStartTS; // the timestamp (milliseconds) when the first bute of the current frame has been recived
-    unsigned long lastFrameStartTS; // the timestamp (milliseconds) when the first bute of the last finished frame has been recived
-    unsigned long frameTimeOut; // user settable - timeout in milliseconds to wait for reply (ACK frame) after issuing a commnad
-    unsigned long interCommandDelay; // user settable - minimum time between issued commands to the radar (req for RD-01)
-    int receivedFrameLen; // the actual length of the last received frame 
-    int currentFrameIndex; // the index to the buffer position wher the next received byte is going to be written
-    RadarMode opMode; // system operational mode one of command / running / reporting / debugging
-    bool inConfigMode; // is tha radar sensor in config mode
-    bool inFrame; // has the receiving of the frame begun
-    bool frameReady; // is the frame finished (all bytes recived of the current frame)
+    uint8_t* bufferCurrentFrame;
+    uint8_t* bufferLastFrame;
+    
+    bool inConfigMode;
+    bool inFrame;
+    bool frameAvailable;
+    RadarMode currentMode;
+    OutputFormat outputFormat;
+    
+    unsigned long frameTimeout;
+    unsigned long interCommandDelay;
+    unsigned long lastFrameStartTS;
+    unsigned long currentFrameStartTS;
+    
+    int currentFrameIndex;
+    int receivedFrameLen;
+    FrameType lastFrameType;
+    
+    // Parsed data
+    uint8_t targetCount;
+    TargetInfo targets[8];
+    
+    // Configuration data
+    FirmwareVersion firmwareVersion;
+    uint32_t serialNumber;
+    ConfigParams configParams;
 };
 
-#else
-#error "This library is made for little endian systems only, and it seems it is beeing compiled for big endian system!" 
-#endif //TEST_LITTLE_ENDIAN
-
-#endif //_AI_THINKER_RD_03_H
+#endif // _AI_THINKER_RD_03D_H
+#endif // TEST_LITTLE_ENDIAN
