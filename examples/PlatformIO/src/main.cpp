@@ -8,6 +8,11 @@
 #include <Arduino.h>
 #include <Ai-Thinker-RD-03.h>
 
+// Function declarations
+void processSingleTarget();
+void processMultiTarget();
+void printStatus();
+
 // RD-03D Radar sensor instance
 AiThinker_RD_03D radar;
 
